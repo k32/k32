@@ -1,0 +1,3 @@
+#+TITLE: k32's home page
+
+Infrequent, low-effort ramblings about programming and math.

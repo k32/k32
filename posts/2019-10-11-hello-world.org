@@ -1,0 +1,428 @@
+---
+title: Trace-based testing
+tags: erlang, software testing, snabbkaffe
+---
+
+Almost every practical algorithm is non-deterministic by
+design. Unpredictable process scheduling has to be dealt with in
+concurrent programs, network reorders and delays messages randomly,
+and fault-tolerant systems can experience failover at any time. It
+comes as no surprise to anyone, and most programmers deal with
+non-determinism on subconscious level. Tests, on the other hand, often
+ignore or fight this property, which becomes a constant supply of
+flakiness.
+
+In this post I want to introduce a simple component[fn:1] test [[https://github.com/klarna/snabbkaffe][library]]
+that tries to embrace non-determinism, or at least live with it. It
+achieves this by giving up on /states/ and focusing on temporal
+relations of /effects/ instead: relevant side effects of the algorithm
+are recorded into a /trace/, which later gets analyzed for desired
+properties. Simply speaking, testcase reads the logs of system under
+test (SUT) in order to find bugs. As a bonus, tests written in this
+style tend to scale better than traditional ones, in theory and in my
+own experience.
+
+The idea of using an event trace for verifying properties of
+concurrent (and distributed) systems is far from new, but it is rather
+uncommon outside of academia. I will also touch on how trace-based
+testing compares with more traditional approaches such as stateful
+property-based testing.
+
+* Conventional approach
+
+Typical component test usually follows the same common scenario: first
+a clean test environment is created. This probably involves spinning
+up Docker containers, initializing tables with test data and so
+on. Sometimes a testcase mocks functions that are of particular
+interest, and injects checks inside these mocks. Then a SUT is
+started. In the simplest case it happens synchronously, but often the
+testcase has to wait for the steady state by probing, sleeping and
+retrying.
+
+After startup is done, actual testing can finally begin. This part
+consists of one or multiple iterations of stimulating the system (via
+an API call or error injection), followed by checking that it responds
+to the stimuli as expected. The checking part may again require
+probing and retrying. It may also involve analyzing data captured by
+the mocks.
+
+Finally a cleanup stage is run, but it is not that interesting. The
+below pseudocode illustrates the entire workflow:
+
+#+BEGIN_SRC erlang
+%% Preparations:
+set_up_test_environment(),
+mock_test_modules(),
+application:start(tested_app),
+%% Actual testing:
+?assertMatch(ok, async_action1()),
+retry_n_times(check_condition_1()),
+?assertMatch(ok, async_action2()),
+retry_n_times(check_condition_2()),
+?assertMatch({error, _}, async_action3()),
+retry_n_times(check_condition_3()),
+...
+%% Clean up:
+application:stop(tested_app),
+tear_down_test_environment()
+#+END_SRC
+
+This basic testing loop can be put together with varying degrees of
+fanciness, up to stateful [[https://proper-testing.github.io/][PropER]] models, but it doesn't change the
+core mechanic described above.
+
+So, what is wrong about this basic and familiar design?
+
+** Scalability
+
+First problem is run time. Obviously, one wants to verify as many
+different properties as possible. But a complex SUT may require a
+complex test environment, which can take arbitrarily long time to set
+up. (Anecdotally, I used to work with a Common Test suite where
+=init_per_testcase= callback took a few minutes. The experience was
+soul-crushing.) Typical response to this challenge, naturally,
+involves trying to cram as many scenarios into the testcase as
+possible. Then comes realization that the testcase becomes extremely
+hard to understand, troubleshoot and extend.
+
+In my experience, there are multiple reasons for this:
+
+1) State deviates too much from the blank slate. Each operation can
+   mutate state of the SUT, and the following checks have to take more
+   and more history into account. Stateful propER suites mitigate this
+   problem by managing model state automatically, but it comes at a
+   significant cost of having to define an elaborate and complete
+   model of the system.
+1) Non-determinism starts crawling out a closet. Typical test starts
+   from a known state, and tries to evolve it in extremely controlled
+   fashion, to avoid dealing with multiple outcomes, because there
+   lies combinatorial explosion and loss of sanity.
+
+   But natural sources of randomness, that exist in any complex
+   system, tend to sneak into the results more and more over time. As
+   far as I know, stateful propERties can't deal with this, as model
+   state is evolved via symbolic execution that happens before SUT is
+   even started.
+
+   This leads to testcase flakiness or unreasonably long waiting until
+   the system stabilizes.
+1) Mocks are not composable. If checks are injected into SUT using
+   mock functions, it becomes exceedingly hard to add new checks.
+
+Conclusion: efficiency of testing could be greatly improved if there
+was an easy way to validate multiple properties without re-running
+test scenarios. Trace-based approach solves this problem, because an
+event trace can be recorded once and analyzed however many times.
+
+** Error detection
+
+"Retry N times until test condition becomes true and call it a pass"
+is a pretty common pattern found in tests. Although it works
+reasonably well most of the time, there are kinds of errors that evade
+it: livelocks for example. During livelock condition the system may
+enter "valid" state temporarily, and the testcase designed via retry
+logic may accept it.
+
+To illustrate how bad it can be, imagine a distributed system
+consisting of two nodes, where automatic failover can happen. Each
+node can reside in three possible states, let's call them =primary=,
+=standby= and =alone=. During normal operation there is one =primary=
+and one =standby= node. The =primary= instance may fail, in which case
+the other node changes its state from =standby= to =alone=, and takes
+over the workload. When the failed node recovers, it enters =standby=
+state and signals to its partner that it's ready, then the latter
+enters =primary= state, and the system becomes redundant again. Now
+suppose there is a bug, that is triggered shortly after state
+transition from =alone= to =primary= happens. It can lead to a
+situation where failover becomes cyclic. "Retry until first success"
+approach will let this error slip through, but this error can be
+trivially detected in a trace-based test by counting failover events.
+
+* Trace-based approach
+
+** Prior work
+
+The below (incomplete!) list contains some examples of libraries using
+trace-based approach:
+
+ - [[https://github.com/uwplse/verdi][Verdi]] is a framework for formal verification of distributed systems
+   using proofs over traces.
+ - [[https://github.com/jepsen-io/jepsen][Jepsen]] is test framework for black-box testing of distributed
+   databases. Internally it maintains a log of calls towards SUT, and
+   most properties are verified by traversing this log (at least as
+   far as my ability to read Clojure goes).
+
+** Introducing Snabbkaffe
+
+[[https://github.com/klarna/snabbkaffe][Snabbkaffe]] is a small Erlang application inspired by the above
+libraries. Above all, it tries to be accessible and compatible with
+other test frameworks, such as Common Test and PropER. It is not
+rigorous[fn:conq]: it can find bugs, but it cannot verify absence of
+errors.
+
+** Instrumenting the code
+
+Trace points are added to the code manually using =?tp= macro:
+
+#+BEGIN_SRC erlang
+?tp(something_happened, #{ param1 => "Something"
+                         , param2 => 217
+                         })
+#+END_SRC
+
+The above line of code, when compiled in test mode, emits an event of
+kind =something_happened=, with some additional data specified in the
+second argument. Any event has a kind, which is an atom identifying
+type of the event. The second argument must be a map that can contain
+anything.
+
+Exact form of this effect captured in the trace will look like this:
+
+#+BEGIN_SRC erlang
+#{ kind   => something_happened
+ , param1 => "Something"
+ , param2 => 217
+ , ts     => ..... % native timestamp
+ }
+#+END_SRC
+
+In the release build this macro will become a [[https://github.com/tolbrino/hut][hut]] log message with
+debug level. Log level can be tuned with a special form of =?tp= macro
+that takes 3 arguments:
+
+#+BEGIN_SRC erlang
+?tp(notice, something_happened, #{ param1 => "Something"
+                                 , param2 => 217
+                                 , ...
+                                 })
+#+END_SRC
+
+...Quite literally, snabbkaffe analyzes the logs of the SUT.
+
+** Structure of the testcase
+
+In order to address scalability issue mentioned above, snabbkaffe
+decouples execution of test scenario from the checks. Testcases are
+split in two parts:
+
+ - *Run stage* where the program runs and emits an event trace
+ - *Check stage* where the trace is collected and validated against
+   the spec(s)
+
+To save user from boilerplate of starting =snabbkaffe_collector= and
+collecting the trace, =?check_trace= macro is defined, that takes care
+of these steps:
+
+#+BEGIN_SRC erlang
+?check_trace(begin
+               %% Run stage:
+               Result
+             end,
+             fun(Result, Trace) ->
+                %% Check stage:
+                CheckStage
+             end).
+#+END_SRC
+
+Return value of the run stage is passed to the check stage function
+together with the collected trace.
+
+There is also an extended version of this macro, that passes some
+additional options to =snabbkaffe_collector=:
+
+#+BEGIN_SRC erlang
+?check_trace(#{timeout => Timeout},
+             begin
+               RunStage
+             end,
+             fun(ReturnValue, Trace) ->
+                CheckStage
+             end).
+#+END_SRC
+
+=timeout= commands collector process to wait for a set period of
+silence before terminating. It might be useful sometimes, although
+depending on timeouts opens road to flakiness. There are a few other
+parameters that are out of scope of this post.
+
+** Analyzing the trace
+
+Remember that trace analysis is done offline, so any pure function can
+be used for this task. Snabbakaffe comes with a few useful functions
+and macros.
+
+Let's begin from my favorite one, called =?strict_causality=. It
+verifies that any event matching pattern =Cause=, is followed by
+exactly one event that matches pattern =Effect=. It can be used to
+encode "something results in another thing" type of properties, here's
+just a few examples:
+
+ * Every external request entering the system eventually gets
+   processed
+ * Killing a node results in failover
+
+Consider an example:
+
+#+BEGIN_SRC erlang
+?strict_causality( #{kind := request, req_id := _Ref} %% Cause
+                 , #{kind := reply,   req_id := _Ref} %% Effect
+                 , Trace
+                 )
+#+END_SRC
+
+=Cause= expression binds variables used in =Effect= expression, so the
+above code reads as "for each request with request id equal to =_Ref=
+there should be a reply with the same id".
+
+There is also a sister macro that allows =Cause= without =Effect= (but
+not vice versa), called =?causality=. It works similarly, although it
+is used less often. Both =?strict_causality= and =?causality= are
+based on the same powerful macro called =?find_pairs=:
+
+#+BEGIN_SRC erlang
+?find_pairs(Strict, Cause, Effect [, Guard], Trace)
+#+END_SRC
+
+Where =Cause= and =Effect= are pattern match expressions, =Guard= is
+an optional predicate that allows to refine cause/effect matching, and
+=Strict= is a boolean defining whether or not effects without a cause
+are allowed. This macro returns a list of pairs of complimentary
+events and singletons, that can be further analyzed, for example using
+=?pair_max_depth= macro, which returns maximal nesting level. This can
+be used e.g. to verify semaphore-like systems.
+
+A few helper macros for extracting relevant data from the trace
+deserve mention too. =?of_kind([kind1, kind2, ...], Trace)=,
+unsurprisingly, filters events with certain
+kinds. =?projection([field1, field2, ...], Trace)= extracts fields
+from events to make data more manageable.
+
+=?projection_complete= and =?projection_is_subset= macros check if
+values of a field form a superset or a subset of a known
+set. =snabbkaffe:unique/1= function checks that there are no duplicate
+events.
+
+In general it is advised to factor complex properties into small
+manageable functions, like in the below example (taken from a real
+project and stripped of irrelevant details):
+
+#+BEGIN_SRC erlang
+my_testcase(Config) ->
+  Values = ...,
+  ?check_trace(
+     %% Run stage:
+     begin
+        ...
+     end,
+     %% Check stage:
+     fun(_Ret, Trace) ->
+         check_all_messages_were_received_once(Trace, Values),
+         check_handler_pids(Trace)
+     end).
+
+check_all_messages_were_received_once(Trace, ExpectedValues) ->
+  Handled = ?of_kind(handle_message, Trace),
+  %% Check that all messages were handled:
+  ?projection_complete(value, Handled, ExpectedValues),
+  %% ...and each message was handled only once:
+  snabbkaffe:unique(Handled).
+
+check_handler_pids(Trace) ->
+  %% Check that all messages were handled by the same process:
+  PidsOfWorkers = ?projection(worker, ?of_kind(handle_message, Trace)),
+  ?assertMatch([_], lists:usort(PidsOfWorkers)).
+#+END_SRC
+
+** Waiting for events
+
+Run stage often needs to wait for something to happen. This can be
+needed, for example, when some part of the system is activated
+asynchronously. Retry loop will still work, of course, but sometimes
+it's more convenient to wait for a certain trace event. =?block_until=
+macro can be used in this situation:
+
+#+BEGIN_SRC erlang
+?check_trace(
+  %% Run stage:
+  begin
+    %% Some async oparation:
+    spawn(fun() ->
+            timer:sleep(100),
+            ?tp(started, #{ ... }),
+            ...
+          end),
+    Timeout = infinity,
+    BackInTime = 100,
+    ?block_until(#{kind := started}, Timeout, BackInTime),
+    ...
+  end,
+  ...
+#+END_SRC
+
+=?block_until= macro works like this: first it tries to find an event
+in the history, going at most =BackInTime= milliseconds into the
+past. If this succeeds, execution continues immediately, otherwise
+calling process gets blocked until the event arrives or crashes after
+timeout.
+
+Although this macro can cover most scenarios, tuning two timings may
+be tricky and error-prone. There is a more "atomic" version of this
+macro, named =?wait_async_action=, which doesn't have to look into the
+past:
+
+#+BEGIN_SRC erlang
+?wait_async_action(Action, Match, Timeout)
+#+END_SRC
+
+It starts waiting for =Action='s expected outcome event =Match= before
+running it.
+
+** PropER integration
+
+Snabbkaffe works nicely with PropER. =?check_trace= macro can be used
+to define stateless properties, and there is, in fact, a shortcut for
+the most common way of doing this: =?forall_trace=. But when it comes
+to stateful properties, things get more interesting on the
+philosophical layer.
+
+Stateful property based testing is an object of pride in the Erlang
+community, and rightfully so. Nonetheless, I would argue that
+trace-based approach is more efficient in the majority of cases. First
+of all, remember that snabbkaffe strives to eliminate the state from
+the equation and focus on effects. This makes trace-based and stateful
+property-based testing almost mutually exclusive. For black-box and
+gray-box testing[fn:st], side effects is all what matters, so
+snabbkaffe fills this niche. On the other hand, stateful properties
+are much better at increasing test coverage.
+
+The below table highlights some of the benefits of each solution:
+
+|                                               | Stateful propER                          | snabbkaffe         |
+|-----------------------------------------------+------------------------------------------+--------------------|
+| Purpose                                       | white-box                                | black and gray-box |
+| Can handle non-determinism                    | no                                       | yes                |
+| Elaborate model is needed                     | yes                                      | not necessarily    |
+| Can reliably explore all states of the system | yes, with good enough model              | no                 |
+| Shrinking                                     | yes                                      | no                 |
+| Amount of boilerplate                         | high (need to define a lot of callbacks) | low                |
+
+
+* Future posts
+
+Here's a teaser of what's coming:
+
+- Declarative error injection
+- Rigorous trace-based models using [[https://github.com/parapluu/Concuerror][Concuerror]]
+
+[fn:1] Since test levels are defined somewhat vaguely, here by
+"component test" I mean testing of an entire OTP application, complete
+with its supervisor tree, application dependencies and external
+services that this application is meant to communicate with
+(e.g. databases).
+
+[fn:conq] But running it under Concuerror might partially mitigate
+this
+
+[fn:st] ...And for your customers. They can't observe the internal
+state of the system, but they sure care about side effects of their
+actions!
