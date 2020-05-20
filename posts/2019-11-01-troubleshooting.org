@@ -1,41 +1,34 @@
----
-title: How to fix anything without a clue
-tags: ramblings, software engineering, troubleshooting
----
+#+TITLE: How to troubleshoot anything without a clue
 
 In this post I want to share some techniques that I developed over the
-years of troubleshooting large-scale mission-critical systems. This
-list will be updated when I come up with more useful generalizations.
+years of troubleshooting large systems. This list will be updated when
+I come up with more useful generalizations.
 
 "In the ideal world this is absolutely impossible!", some of the
 readers may exclaim in terror and disgust, "This is a bad
 practice!". I will address this in a chapter called "Have zero trust
-in humanity". But even if your service has no bugs whatsoever, has
-rock-solid deployment pipeline, and /cannot possibly go wrong/, it
-still lives in the shadow of a huge fan, that other, less reliable,
-code flies by at near-miss distance.
+in humanity".
 
-You can also approach troubleshooting from a more positive
+Although in most cases troubleshooting is a consequence of human
+imperfection, you can approach it from a more positive
 perspective. Imagine you use an opensource product that lacks a
 feature you want. You want to implement this feature, but where to
-begin?  Techniques described below will help to navigate through
-unfamiliar source code quickly.
+begin? Techniques described below will help to navigate through
+unfamiliar code bases quickly.
 
 * Essential dos and don'ts
-
-* Don'ts
 
 ** Don't debug in production
 
 First and foremost: don't use debug tools in the production
 environment. Debuggers or excessive logging put a lot of stress on the
-system, so much so that it will likely explode under high
-traffic. There are introspection tools that are /more or less/ safe to
-use in a live environment, but one should be careful with those
-too. I'll discuss some of these tools below.
+system, so much so it will likely explode under high traffic. There
+are introspection tools that are /more or less/ safe to use in a live
+environment, but one should be careful with those too. I'll discuss
+some of these tools below.
 
 Logging in to a live system to run a debug command is reckless enough
-already, but preparing an instruction for an Ops team how to do it,
+already, but preparing an instruction for an ops team how to do it,
 should be absolutely out of question! Suppose you verified the
 instruction on a test node, so you know that it finishes in a couple
 seconds. Then you login to production, and the same command hangs for
@@ -49,23 +42,22 @@ other person won't react as quickly.
 
 Second big mistake: don't try to understand the entire code
 base. Typical enterprise system consists of hundreds KLOC not counting
-dependencies, it was written by dozens of engineers over the years,
-and it interacts with a few other systems. It's just not a fair match
-against a single person (you) working under time pressure.  If you try
-to find out why error happens by following the code ("a function that
-crashes is called from here, where data comes from there"), you'll get
-lost very quickly. You can try this approach, and it /may/ work with
-the most obvious bugs, but keep in mind that its complexity grows
-exponentially. If you find yourself looking through more than, say, 3
-source code files at the same time, consider switching to more clever
-techniques described below.
+dependencies and the underlying stack, it was written by dozens of
+engineers over the years, and it interacts with a few other
+systems. It's just not a fair match against a single person working
+under time pressure.  If you try to find out why error happens by
+following the code ("a function that crashes is called from here,
+where data comes from there"), you'll get lost very quickly. You can
+try this approach, and it /may/ work with the most obvious bugs, but
+keep in mind that its complexity grows exponentially. If you find
+yourself looking through more than, say, 3 source code files at the
+same time, consider switching to more clever techniques described
+below.
 
 Understanding how the system works /will/ be required later, when you
 work on a "proper" solution, but during peak firefighting stage this
 knowledge is unobtainable, so you need to be prepared to perform on
 stage without a clue.
-
-* Dos
 
 ** Estimate urgency
 
@@ -74,12 +66,11 @@ quality of service is slowly declining" to "company is losing =$$$$/s=
 /right now/". Depending on the situation, more aggressive
 troubleshooting techniques become appropriate.
 
-** Have you tried turning it off and on?
+** Have they tried turning it off and on?
 
-Don't underestimate the importance of "fixing stuff by
-power-cycling". It's efficient in, like, 90% cases. If you're entering
-on-call rotation, learn how to restart your services, and what is the
-impact of doing so.
+Don't underestimate the importance of "fixing bugs by
+power-cycling". The ops team needs the runbooks describing how (and
+when) to restart the misbehaving node.
 
 * Advanced techniques
 
@@ -91,15 +82,23 @@ efficient. In short, it's a way of reasoning based around questions:
  - Anomaly was reported at 10am, what log messages appeared (or
    disappeared) around this time?
  - It worked before release R, and it doesn't work now. What was in
-   release R?
+   the release R?
  - It works with data A, but not data B. What is the difference
    between A and B?
 
-In other words, how does an anomaly /change/ the behavior of the
-system.
+In other words, you need to find how does an anomaly /change/ the
+behavior of the system. The more specific your questions become, the
+smaller is your search space. Your goal is to narrow down the
+difference between working and broken state of the system to the
+smallest possible set.
 
-The more specific your questions become, the smaller is your search
-space. Your goal is to narrow down difference to the smallest possible
+Importance of this method is based on an assumption that any
+production system is /mostly/ correct in a sense that it exhibits
+somewhat sane behavior in 90% of cases. If it was just broken through
+and thorough, it wouldn't have survived, and nobody wouldn't have
+missed it. Therefore trying to find an error simply by following the
+common code path is fruitless, because this code path is /most likely/
+correct.
 
 ** Passive
 
@@ -200,7 +199,7 @@ don't let anyone know.
 The best way to apply your troubleshooting skills is by developing new
 systems, rather than keeping legacy code on life support. Most
 appropriate time for bug hunting is /before/ the software goes
-live. Good troubleshooters make the best programmers, because they've
+live. Good troubleshooters make the best programmers, because they
 learned from others' mistakes. They tend to design systems that are
 more resilient to failure, and that are easier to troubleshoot. They
 intuitively see scenarios that should be covered by tests. They
@@ -209,14 +208,12 @@ any platform-layer designer.
 
 Note that I don't encourage you to program defensively, instead:
 
- - Physically separate systems that should have AAA reliability from
-   the systems those code should be able to mutate quickly following
-   business processes
+ - Separate systems that should have AAA reliability from the systems
+   those code should be able to mutate quickly following business
+   processes
  - Design systems that have redundancy
  - Design systems that fail safe
- - Employ good DevOps practices, such as blue-green deployments,
-   canary deployments, gradual roll-out of features, A/B tests, chaos
-   monkeys and what not
+ - Employ good deployment practices
  - Keep it simple, stupid. When you write a line of code, imagine that
    someone has to troubleshoot it at 4 am, and they are good at
    this. Which means they /will/ find your hideout

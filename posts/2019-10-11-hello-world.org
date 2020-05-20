@@ -1,7 +1,4 @@
----
-title: Trace-based testing
-tags: erlang, software testing, snabbkaffe
----
+#+TITLE: Trace-based testing
 
 Almost every practical algorithm is non-deterministic by
 design. Unpredictable process scheduling has to be dealt with in

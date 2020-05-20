@@ -1,0 +1,11 @@
+#+TITLE: k32's notebook
+#+OPTIONS: num:nil
+
+* Links
+
++ [[https://blog.erlang.moe/atom.xml][Feed]]
++ [[https://github.com/k32][Github]]
+
+* Posts
+
+- [[file:2019-10-11-hello-world.org][Trace-based testing]]
