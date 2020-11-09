@@ -1,0 +1,99 @@
+#+TITLE: Testing fault tolerant systems with snabbkaffe, the practice
+#+DATE: 2020-10-29
+
+[[https://github.com/klarna/snabbkaffe][Snabbkaffe]] is an Erlang library that simplifies testing of concurrent
+and non-deterministic systems. Today I am going to talk about its
+fault injection feature, that helps tuning supervision trees and
+verifying fault-tolerance of the system in general.
+
+Just to give a small recap[fn:old] of how snabbakaffe works: first the
+system under test (SUT) runs and emits a structured event log
+(trace). We refer to this process as /run stage/. Then the trace is
+analyzed for various properties, such as presence or absence of
+certain events, "happens before" relationships and so on. This
+analysis is done offline, and we refer to it as /check stage/. Traces
+are emitted using =?tp(kind, Data)= macro, that can be used anywhere
+in the code of the SUT or a testcase. In the release build it becomes
+a regular debug message. But in the test build it can also be used to
+inject crashes into the system.
+
+Suppose we have a system with two processes under a supervision tree.
+
+#+BEGIN_SRC erlang
+
+#+END_SRC
+
+On the high level a testcase with fault injection looks something like this:
+
+#+BEGIN_SRC erlang
+-include_lib("snabbkaffe/include/snabbkaffe.hrl").
+
+...
+
+my_testcase(Config) ->
+  ?check_trace(
+    %% Run stage:
+    begin
+      ?inject_crash
+    end,
+    %% Check stage:
+    fun(Result, Trace) ->
+      ...
+    end).
+#+END_SRC
+
+
+Let's consider a few real-life testcases where we used fault
+injection.
+
+#+BEGIN_SRC erlang
+t_flush_on_crash(Config) when is_list(Config) ->
+  NMessages = 100,
+  %% 1st node should process half of the payload before crashing:
+  CrashOffset = NMessages div 2,
+  Messages = lists:seq(1, NMessages),
+  PipeSpec = [ {map, kflow_test_map, #{id => '1'}}
+             , {aggregate, kflow_test_aggregate,
+                #{ id => 2
+                 , size => NMessages
+                 }}
+             ],
+  ?check_trace(
+     %% Run stage:
+     begin
+       ?inject_crash( #{ ?snk_kind := kflow_test_map_seen_message
+                       , offset    := CrashOffset
+                       }
+                    , snabbkaffe_nemesis:always_crash()
+                    ),
+       {ok, Pipe, Feed} = kflow_pipe:start_link(#{ id         => [test_pipe]
+                                                 , definition => PipeSpec
+                                                 }),
+       %% We expect this process to crash:
+       unlink(Pipe),
+       MRef = monitor(process, Pipe),
+       catch feed_pipe(Feed, Messages),
+       receive
+         {'DOWN', MRef, process, Pipe, _} -> ok
+       after 10000 ->
+           error(would_not_die)
+       end
+     end,
+     %% Check stage:
+     fun(_Result, Trace) ->
+         %% 1. Check that node number 1 stopped processing after first
+         %% crash:
+         LastSuccOffset = CrashOffset - 1,
+         ?assertEqual( lists:seq(1, LastSuccOffset)
+                     , ?projection( offset
+                                  , ?of_kind(kflow_test_map_seen_message, Trace)
+                                  )
+                     ),
+         %% 2. Check that nodes 2 flushed buffered messages:
+         ?assertMatch( [#{offset := LastSuccOffset}]
+                     , ?of_kind(kflow_test_aggregate_out, Trace)
+                     )
+     end).
+#+END_SRC
+
+[fn:old] An older post that explains the basics is found [[https://blog.erlang.moe/2019-10-11-hello-world.html][here]]

@@ -1,0 +1,310 @@
+#+TITLE: How to troubleshoot anything without a clue
+#+OPTIONS: ^:nil
+#+DATE: 2020-11-08
+
+In this post I want to share some techniques that I developed over the
+years of troubleshooting large distributed systems. This list will be
+updated as I come up with more useful generalizations. Disclaimer:
+this article is heavily focused on platform-level development, so it
+may not be fully applicable to other areas of software engineering.
+
+"In the ideal world this is absolutely impossible!", some of the
+readers may exclaim in terror and disgust, "This is a bad
+practice!". I will address their concerns in a chapter called "Have
+zero trust in humanity".
+
+Although the need to troubleshoot anything mostly arises as
+consequence of human imperfection, you can approach it from a more
+positive perspective. Imagine that you use an open source product that
+lacks certain feature. You want to implement this feature, but how to
+approach a large, unfamiliar code base? Some techniques described
+below will help to navigate through the unknown code.
+
+* Essential dos and don'ts
+
+** Don't mess with the production
+
+First and foremost: don't use debug tools in the production
+environment. Debuggers or excessive logging put a lot of stress on the
+system, so much so it will likely explode under normal traffic. There
+are introspection tools that are /more or less/ safe to use in a live
+environment, but one should be careful with those too. I'll discuss
+some of these tools below.
+
+Logging in to a live system to run a debug command is reckless enough
+already, but preparing an instruction for an ops team to do it should
+be absolutely out of question! Suppose you verified the instruction on
+a test node, so you know that it finishes in a couple seconds. Then
+you login to the production, and the same command hangs for more than
+10 seconds. You quickly realize that something went horribly wrong,
+and you have a chance to abort the operation before the server comes
+to a complete stop and your SSH session dies. Another person won't
+react as quickly. So make sure to supervise any interventions into the
+live systems in real-time.
+
+** Syslog is your debugger
+
+Learn how to debug without debugger. "Printf debugging" is considered
+bad practice by some... Lies! Whoever tells you that, wants to sell
+you pro version of Visual Studio or something as useless. Truth is
+that nowadays most serious systems are distributed. Stop-the-world
+debugger that steps in and over functions won't work in a distributed
+environment. Network sessions will time out and watchdog will kill
+your service, if you try to stop it for debugging. And, obviously, you
+can't stop a production system to debug user request by stepping over
+functions.
+
+ - Learn how to reason about the systems by reading logs and traces.
+ - Make sure to log useful information.
+ - Learn how to read and filter logs efficiently.
+ - Learn how to map log messages to the locations in the code
+ - Employ real-time log collection and indexing tools like
+   logstash/elasticsearch, Splunk, etc. in the production.
+
+** Don't try to understand how things work
+
+...and focus on finding why they /don't work/.
+
+Second big mistake: don't try to understand the entire code
+base. Typical enterprise system consists of hundreds KLOC, not
+counting dependencies and the underlying stack. It was written by
+dozens of engineers over the years, and it interacts with a few other
+systems. It's just not a fair match against a single person working
+under time pressure.  If you try to find out why error happens by
+following the code ("a function that crashes is called from here,
+where data comes from there"), you'll get lost very
+quickly[fn:gof]. You can try this approach, and it /may/ work with the
+most obvious bugs, but keep in mind that its complexity grows
+exponentially. If you find yourself looking through more than, say, 5
+source code files at the same time, consider switching to more clever
+techniques described below.
+
+Understanding how the system works /will/ be required later, when you
+work on a "proper" solution, but during peak firefighting stage this
+knowledge is unobtainable, so you need to be prepared to perform
+surgery without a clue.
+
+** Estimate urgency
+
+Impact of software issues varies from "batch job is delayed, and
+quality of service is slowly declining" to "company is losing =$$$$/s=
+/right now/". Depending on the situation, more aggressive
+troubleshooting techniques become appropriate.
+
+** Have they tried turning it off and on?
+
+Don't underestimate the importance of "fixing bugs by
+power-cycling". The ops team needs the runbooks describing how (and
+when) to restart the misbehaving node.
+
+* Advanced techniques
+
+** Differential troubleshooting
+
+This technique is absolutely essential. It is simple, but exceedingly
+efficient. In short, it's a way of reasoning based around questions:
+
+ 1) Anomaly was reported at 10am, what log messages appeared (or
+    disappeared) around this time?
+ 2) It worked before release R, and it doesn't work now. What is the
+    delta of the release R?
+ 3) It works with data A, but not data B. What is the delta between
+    requests A and B?
+
+In other words, you need to find how does the anomaly /change/ the
+behavior of the system. The more specific your questions become, the
+smaller is your search space. Your goal is to narrow down the
+difference between working and broken state of the system to the
+smallest possible set.
+
+Importance of this method is based on an assumption that any
+production system is /mostly/ correct in a sense that it exhibits
+somewhat sane behavior in 90% of cases. If it was more broken than
+that, nobody would expect it to work in the first place. Therefore
+trying to find an error simply by following the common code path is
+fruitless, because this code path is /most likely/ correct.
+
+** Bisection
+
+Typically requests have to travel through lots of individual services,
+message brokers, functions and layers of abstraction. As usual,
+bisection is the quickest method of pinpointing the place in the code
+that corrupts the data. Instead of following the request from the
+gateway proxy to the database, try to find what's going on
+approximately in the middle between them. Is data already corrupted
+there?
+
+** Entropy minimization
+
+
+* Tools
+
+(To be extended)
+
+** Log index
+Ideally, all logs should be collected in one place and
+indexed. Logstash/elasticsearch/Kibana stack or Splunk are commonly
+used for this.
+
+** Ag
+
+https://github.com/ggreer/the_silver_searcher This tool helps to
+navigate through the code and it's blazing-fast (>100 kLOC project? No
+problem!). I mostly use it via =ag= Emacs plugin.
+
+** Source code index
+
+Github, bitbucket and other source control servers index all the
+code. Code search feature is essential for finding source of error
+messages and low-entropy data during troubleshooting. Don't forget to
+use it.
+
+** Perf
+Perf is a tool that is not /too dangerous/ to use in production.
+
+** Metrics
+Of course you should have them.
+
+** strace/ltrace
+I would not recommend running them in production. But these tools are
+indispensable for local debugging.
+
+** tcpdump
+Tcpdump is more or less safe to use in production (YMMV), but you must
+filter by interface and port. Collect data to a local file and open it
+with wireshark on your PC. Don't save capture file on an NFS mount,
+and don't print capture to the console attached by SSH, unless you
+want to explore practical limits of infinite recursion.
+
+** system_monitor
+
+If your system is written in Erlang or Elixir, consider using
+[[https://github.com/klarna-incubator/system_monitor][system_monitor]] app. It was of tremendous help during many incidents.
+
+** Emacs "M-x occur" command
+
+Emacs comes with a simple command called =occur=. It does, quote:
+
+#+BEGIN_QUOTE
+Show all lines in the current buffer containing a match for REGEXP.
+If a match spreads across multiple lines, all those lines are shown.
+#+END_QUOTE
+
+Which is very useful for analyzing log files.
+
+* Have zero trust in humanity                                          :rant:
+
+If you find yourself dismissing some idea because your inner voice
+says "well, this would be too obvious" or "no one could do something
+like this", chances are that actually you are onto something. After
+seeing bugs that no person should see, I conclude with all confidence,
+that our industry is absolutely cursed. Self-made autodidacts and
+university graduates alike have no idea how to do things. Putting your
+trust in software engineer's ability to do something sane is like
+expecting money back from the "Nigerian prince" you helped to
+liberate.
+
+This raises a question: if nothing can be trusted, how to avoid
+depth-first'ing into your entire OS and hardware stack? The answer
+lies in differential troubleshooting technique described above. You
+can suspect a bug in Linux. But if you do so, it means the bug should
+manifest not only in your business application, but in all other
+processes running on the same host. If you don't observe anomalies in
+the other processes, OS bug is less likely than application
+bug. Bisection technique is also useful: if you suspect a Linux kernel
+bug, run strace to find if data that goes into the kernel is valid
+(most likely you will find that it's not).
+
+If you know OS and networking level well enough, and you practice
+differential troubleshooting routine, your brain can generate and
+dismiss potential failure scenarios in split second, so suspecting
+services and libraries outside of your own is not as time-consuming as
+one may think.
+
+* Don't panic
+
+When nothing works, try to get some company. Worst thing that can
+happen is when you panic and stop trying new ideas. This happens even
+to the best of us. Brainstorming helps a lot, but just having a
+friendly chat, while something is burning, helps people staying
+productive.
+
+* Nightmare difficulty: "Zero-knowledge troubleshooting"
+
+Any bug is a cakewalk, when it concerns a system that you actively
+develop. But I bet your company has Great Old Ones: systems that work
+largely unnoticed, until they break. And things get much spicier when
+you first learn about such system from a bug report with URGENT!
+headline.
+
+I know, I know, situation like this could /never/ happen in the ideal
+world. But if you're reading this post, then your plane of existence
+intersects with mine. Be wary: in a hellish place that I inhibit,
+people retire, change teams, and there are 10x rockstar ninja
+evangelists who develop something in spite of architect's advice just
+to put it on their resumé and hop onto a next job. If you receive a
+trouble report related to one of these systems, and have no idea what
+it does and where it lives, don't worry too much. There is a person
+who knows that: the one who submitted the bug report. Interrogate them
+until you find some entry points towards the system. Learn hostnames,
+keywords, what is the expected behavior, what behavior is unexpected,
+and so forth. Then use source code index and all the techniques
+described above.
+
+P.S. If you find yourself solving this kind of problem, don't forget
+to look around and check if you're the last person left in the
+office. Consider tactical retreat in the direction of job market.
+
+* Philosophical digression: search space
+
+In the last chapter I'd like to ramble a little about .
+
+Search space is a Cartesian product of
+
+ - Set of valid values of instruction pointer in the application's
+   executable code
+ - Input data
+ - Application's transient state
+ - Application's persistent state
+ - State of hardware and OS
+ - State of the surrounding network
+ - State of external services the application depends on
+ - ...
+
+And it's large. Some of places in this set are unreachable (functional
+programs, memory protection, blah-blah). Some places are explored
+during testing. Some subsets correspond to
+
+* Epilogue
+
+This knowledge may ruin your life. If you master these techniques,
+don't let anyone know, or else you may find yourself putting out
+fires non stop.
+
+The best way to apply your troubleshooting skills is by developing new
+systems, rather than keeping legacy code on life support. Most
+appropriate time for bug hunting is /before/ the software goes
+live. Good troubleshooters make the best programmers, because they
+learned from others' mistakes. They tend to design systems that are
+more resilient to failure, and that are easier to troubleshoot. They
+intuitively see scenarios that should be covered by tests. They
+learned negative, pessimistic way of thinking, that is essential for
+any platform-layer designer. Conversely, any person who can't
+troubleshoot systems, can't be trusted to write platform-level code.
+
+Please note that I don't encourage you to program defensively, but
+instead:
+
+ - Separate systems that should have AAA reliability from the systems
+   those code should be able to mutate quickly due to business
+   requirements
+ - Write good tests
+ - Design systems that have redundancy
+ - Design systems that fail safe
+ - Employ good deployment practices, like green/blue deployments
+ - Keep it simple, stupid. When you write a line of code, imagine that
+   someone has to troubleshoot it at 4 am, and they are good at
+   this. Which means they /will/ find where you live.
+
+[fn:gof] Especially when the code is written by a person who read
+"Gang of Four" unironically

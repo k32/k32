@@ -3,9 +3,12 @@
 
 * Links
 
-+ [[https://blog.erlang.moe/atom.xml][Feed]]
-+ [[https://github.com/k32][Github]]
++ [[https://blog.erlang.moe/atom.xml][Atom feed]]
++ [[https://github.com/k32][My github]]
++ Found a mistake? Just make a PR here: https://github.com/k32/k32
 
 * Posts
 
-- [[file:2019-10-11-hello-world.org][Trace-based testing]]
+*** 2020
+*** 2019
+ - [[file:2019-10-11-hello-world.org][Trace-based testing]]

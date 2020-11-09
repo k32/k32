@@ -1,4 +1,5 @@
 #+TITLE: Trace-based testing
+#+DATE: 2019-10-11
 
 Almost every practical algorithm is non-deterministic by
 design. Unpredictable process scheduling has to be dealt with in
