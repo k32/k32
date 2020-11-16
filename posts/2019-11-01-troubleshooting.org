@@ -2,7 +2,7 @@
 #+OPTIONS: ^:nil
 #+DATE: 2020-11-08
 
-In this post I want to share some techniques that I developed over the
+In this post I want to share some techniques that I adopted over the
 years of troubleshooting large distributed systems. This list will be
 updated as I come up with more useful generalizations. Disclaimer:
 this article is heavily focused on platform-level development, so it
@@ -13,12 +13,12 @@ readers may exclaim in terror and disgust, "This is a bad
 practice!". I will address their concerns in a chapter called "Have
 zero trust in humanity".
 
-Although the need to troubleshoot anything mostly arises as
-consequence of human imperfection, you can approach it from a more
-positive perspective. Imagine that you use an open source product that
+Although the need to troubleshoot anything mostly arises as a
+consequence of human imperfection, it can be seen from a more positive
+perspective. Imagine that you're using an open source product that
 lacks certain feature. You want to implement this feature, but how to
 approach a large, unfamiliar code base? Some techniques described
-below will help to navigate through the unknown code.
+below will help to navigate through the unknown code more quickly.
 
 * Essential dos and don'ts
 
@@ -31,58 +31,36 @@ are introspection tools that are /more or less/ safe to use in a live
 environment, but one should be careful with those too. I'll discuss
 some of these tools below.
 
-Logging in to a live system to run a debug command is reckless enough
-already, but preparing an instruction for an ops team to do it should
-be absolutely out of question! Suppose you verified the instruction on
-a test node, so you know that it finishes in a couple seconds. Then
-you login to the production, and the same command hangs for more than
-10 seconds. You quickly realize that something went horribly wrong,
-and you have a chance to abort the operation before the server comes
-to a complete stop and your SSH session dies. Another person won't
-react as quickly. So make sure to supervise any interventions into the
-live systems in real-time.
+Logging in to a live system to run some sort of heavy debug job is
+reckless enough already, but some large companies enforce even worse
+practices.  Namely, they require developers to prepare a "debugging
+runbook" for the ops team. Never agree to do this, unless you
+personally supervise the process in real time. Here's why: suppose you
+verified the instruction on a test node under simulated traffic, and
+you know that it must finish in a couple seconds and the CPU load must
+be so-and-so. Then you login to the production, and the same command
+hangs for more than 10 seconds. You quickly realize that something
+went horribly wrong, and use the last chance to abort the operation
+before the server comes to a complete stop and your SSH session
+dies. Another person won't react as quickly.
 
 ** Syslog is your debugger
 
 Learn how to debug without debugger. "Printf debugging" is considered
-bad practice by some... Lies! Whoever tells you that, wants to sell
+bad practice by some... Lies. Whoever tells you that, wants to sell
 you pro version of Visual Studio or something as useless. Truth is
 that nowadays most serious systems are distributed. Stop-the-world
-debugger that steps in and over functions won't work in a distributed
-environment. Network sessions will time out and watchdog will kill
-your service, if you try to stop it for debugging. And, obviously, you
-can't stop a production system to debug user request by stepping over
-functions.
+debugger that steps in and over functions won't work in the
+distributed environment. Network sessions will time out and watchdog
+will kill your service, if you try to stop it for debugging. And,
+obviously, you can't stop a production system to debug a user request.
 
- - Learn how to reason about the systems by reading logs and traces.
- - Make sure to log useful information.
- - Learn how to read and filter logs efficiently.
- - Learn how to map log messages to the locations in the code
+ - Learn how to reason about the systems by reading logs and traces
+ - Make sure to log useful information
+ - Learn how to read and filter logs efficiently
+ - Learn how to quickly map log messages to the locations in the code
  - Employ real-time log collection and indexing tools like
-   logstash/elasticsearch, Splunk, etc. in the production.
-
-** Don't try to understand how things work
-
-...and focus on finding why they /don't work/.
-
-Second big mistake: don't try to understand the entire code
-base. Typical enterprise system consists of hundreds KLOC, not
-counting dependencies and the underlying stack. It was written by
-dozens of engineers over the years, and it interacts with a few other
-systems. It's just not a fair match against a single person working
-under time pressure.  If you try to find out why error happens by
-following the code ("a function that crashes is called from here,
-where data comes from there"), you'll get lost very
-quickly[fn:gof]. You can try this approach, and it /may/ work with the
-most obvious bugs, but keep in mind that its complexity grows
-exponentially. If you find yourself looking through more than, say, 5
-source code files at the same time, consider switching to more clever
-techniques described below.
-
-Understanding how the system works /will/ be required later, when you
-work on a "proper" solution, but during peak firefighting stage this
-knowledge is unobtainable, so you need to be prepared to perform
-surgery without a clue.
+   logstash/elasticsearch, Splunk, etc. in the production
 
 ** Estimate urgency
 
@@ -93,16 +71,40 @@ troubleshooting techniques become appropriate.
 
 ** Have they tried turning it off and on?
 
-Don't underestimate the importance of "fixing bugs by
-power-cycling". The ops team needs the runbooks describing how (and
+Don't underestimate the unreasonable effectiveness of
+power-cycling. The ops team needs the run books describing how (and
 when) to restart the misbehaving node.
+
+** Don't try to understand how things work
+
+...and focus on finding why they /don't work/.
+
+Another big mistake: trying to understand the entire code
+base. Typical enterprise system consists of hundreds KLOC, not
+counting dependencies and the underlying stack. It was written by
+dozens of engineers over the years, and it interacts with a few other
+services. It's just not a fair match against a single person working
+under time pressure.  If you try to find out why error happens by
+following the code ("a function that crashes is called from here,
+where data comes from there"), you'll get lost very
+quickly[fn:gof]. You can try this approach, and it /may/ work with the
+most obvious bugs, but keep in mind that its complexity grows
+rapidly. If you find yourself looking through more than, say, 5 source
+code files at the same time, consider switching to more clever
+techniques described below.
+
+Understanding how the system works /will/ be required later, when you
+work on a "proper" solution, but during the peak firefighting stage
+this knowledge is unobtainable, so you need to be prepared to perform
+surgery without a clue.
 
 * Advanced techniques
 
 ** Differential troubleshooting
 
-This technique is absolutely essential. It is simple, but exceedingly
-efficient. In short, it's a way of reasoning based around questions:
+I find this technique absolutely essential for dealing with fires in
+the companies' attics. It is simple, but exceedingly efficient. In
+short, it's a way of reasoning based around questions:
 
  1) Anomaly was reported at 10am, what log messages appeared (or
     disappeared) around this time?
@@ -110,17 +112,18 @@ efficient. In short, it's a way of reasoning based around questions:
     delta of the release R?
  3) It works with data A, but not data B. What is the delta between
     requests A and B?
+ 4) ...
 
-In other words, you need to find how does the anomaly /change/ the
+In other words, you need to find how the anomaly /changes/ the
 behavior of the system. The more specific your questions become, the
 smaller is your search space. Your goal is to narrow down the
 difference between working and broken state of the system to the
 smallest possible set.
 
-Importance of this method is based on an assumption that any
+Importance of this method is based on the assumption that any
 production system is /mostly/ correct in a sense that it exhibits
 somewhat sane behavior in 90% of cases. If it was more broken than
-that, nobody would expect it to work in the first place. Therefore
+that, nobody would expect it to work in the first place. Therefore,
 trying to find an error simply by following the common code path is
 fruitless, because this code path is /most likely/ correct.
 
@@ -134,8 +137,38 @@ gateway proxy to the database, try to find what's going on
 approximately in the middle between them. Is data already corrupted
 there?
 
-** Entropy minimization
+** Surprisal maximization
 
+Wikipedia gives the following definition of surprisal:
+
+#+BEGIN_QUOTE
+The information content (also called the surprisal) of an event =E= is
+a function which decreases as the probability =p(E)= of an event
+increases.
+#+END_QUOTE
+
+When analyzing a broken request, or broken data, or broken code, try
+finding the most distinct ("surprisal") part of it. Suppose you're
+looking at some problematic data similar to this:
+
+|----------+--------|
+| id       | 345637 |
+| code     |      3 |
+| errandno |   6422 |
+|----------+--------|
+
+Grepping project sources for the field name "code" will likely yield
+thousands of results. Searching for "id" will probably yield even
+more. On the other hand, "errandno" field (whatever it means doesn't
+matter) is pretty uncommon. It's not even an English word, which makes
+it even better for our purposes. Search for "errandno" in the
+company's source code index and you will likely find just 3 or 4
+entries. One of them will point at the origin of the wrong data. Now
+what about integer values? Searching for 3 in the logs will give you
+millions of irrelevant results. So start from looking for
+value 345637.
+
+I hope this example makes the idea pretty clear.
 
 * Tools
 
@@ -149,15 +182,15 @@ used for this.
 ** Ag
 
 https://github.com/ggreer/the_silver_searcher This tool helps to
-navigate through the code and it's blazing-fast (>100 kLOC project? No
-problem!). I mostly use it via =ag= Emacs plugin.
+navigate through the code, and it's blazing-fast (>100 kLOC project?
+No problem.) I mostly use it via =ag= Emacs plugin.
 
 ** Source code index
 
 Github, bitbucket and other source control servers index all the
-code. Code search feature is essential for finding source of error
-messages and low-entropy data during troubleshooting. Don't forget to
-use it.
+code. Code search feature is essential for finding where error
+messages come from, and for searching low-entropy data during
+troubleshooting. Don't forget to use it.
 
 ** Perf
 Perf is a tool that is not /too dangerous/ to use in production.
@@ -172,9 +205,9 @@ indispensable for local debugging.
 ** tcpdump
 Tcpdump is more or less safe to use in production (YMMV), but you must
 filter by interface and port. Collect data to a local file and open it
-with wireshark on your PC. Don't save capture file on an NFS mount,
-and don't print capture to the console attached by SSH, unless you
-want to explore practical limits of infinite recursion.
+with wireshark on your PC. Don't save capture file on any NFS mounts,
+and don't print captured packets to the console attached by SSH,
+unless you want to explore limits of infinite recursion.
 
 ** system_monitor
 
@@ -183,7 +216,7 @@ If your system is written in Erlang or Elixir, consider using
 
 ** Emacs "M-x occur" command
 
-Emacs comes with a simple command called =occur=. It does, quote:
+Emacs comes with a handy command called =occur=. It does, quote:
 
 #+BEGIN_QUOTE
 Show all lines in the current buffer containing a match for REGEXP.
@@ -201,13 +234,13 @@ seeing bugs that no person should see, I conclude with all confidence,
 that our industry is absolutely cursed. Self-made autodidacts and
 university graduates alike have no idea how to do things. Putting your
 trust in software engineer's ability to do something sane is like
-expecting money back from the "Nigerian prince" you helped to
-liberate.
+expecting compensation from the Nigerian prince you helped to liberate
+with the help of your new pen-friend.
 
 This raises a question: if nothing can be trusted, how to avoid
 depth-first'ing into your entire OS and hardware stack? The answer
 lies in differential troubleshooting technique described above. You
-can suspect a bug in Linux. But if you do so, it means the bug should
+can suspect a bug in Linux. But if you do, it means the bug should
 manifest not only in your business application, but in all other
 processes running on the same host. If you don't observe anomalies in
 the other processes, OS bug is less likely than application
@@ -218,12 +251,12 @@ bug, run strace to find if data that goes into the kernel is valid
 If you know OS and networking level well enough, and you practice
 differential troubleshooting routine, your brain can generate and
 dismiss potential failure scenarios in split second, so suspecting
-services and libraries outside of your own is not as time-consuming as
+services and libraries outside your own is not as time-consuming as
 one may think.
 
 * Don't panic
 
-When nothing works, try to get some company. Worst thing that can
+When nothing works, try to get some company. The worst thing that can
 happen is when you panic and stop trying new ideas. This happens even
 to the best of us. Brainstorming helps a lot, but just having a
 friendly chat, while something is burning, helps people staying
@@ -240,9 +273,9 @@ headline.
 I know, I know, situation like this could /never/ happen in the ideal
 world. But if you're reading this post, then your plane of existence
 intersects with mine. Be wary: in a hellish place that I inhibit,
-people retire, change teams, and there are 10x rockstar ninja
+people retire, change teams, and there are 10x rock star ninja
 evangelists who develop something in spite of architect's advice just
-to put it on their resumé and hop onto a next job. If you receive a
+to put it on their résumé and hop onto a next job. If you receive a
 trouble report related to one of these systems, and have no idea what
 it does and where it lives, don't worry too much. There is a person
 who knows that: the one who submitted the bug report. Interrogate them
@@ -255,31 +288,11 @@ P.S. If you find yourself solving this kind of problem, don't forget
 to look around and check if you're the last person left in the
 office. Consider tactical retreat in the direction of job market.
 
-* Philosophical digression: search space
-
-In the last chapter I'd like to ramble a little about .
-
-Search space is a Cartesian product of
-
- - Set of valid values of instruction pointer in the application's
-   executable code
- - Input data
- - Application's transient state
- - Application's persistent state
- - State of hardware and OS
- - State of the surrounding network
- - State of external services the application depends on
- - ...
-
-And it's large. Some of places in this set are unreachable (functional
-programs, memory protection, blah-blah). Some places are explored
-during testing. Some subsets correspond to
-
 * Epilogue
 
 This knowledge may ruin your life. If you master these techniques,
 don't let anyone know, or else you may find yourself putting out
-fires non stop.
+fires non-stop.
 
 The best way to apply your troubleshooting skills is by developing new
 systems, rather than keeping legacy code on life support. Most
@@ -300,11 +313,11 @@ instead:
    requirements
  - Write good tests
  - Design systems that have redundancy
- - Design systems that fail safe
+ - Design systems that are fail-safe
  - Employ good deployment practices, like green/blue deployments
  - Keep it simple, stupid. When you write a line of code, imagine that
    someone has to troubleshoot it at 4 am, and they are good at
-   this. Which means they /will/ find where you live.
+   this. Which is to say, they /will/ find where you live.
 
 [fn:gof] Especially when the code is written by a person who read
 "Gang of Four" unironically

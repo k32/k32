@@ -76,7 +76,7 @@
  out-dir
  "https://blog.erlang.moe/"
  (directory-files out-dir nil "[0-9]\\{4\\}.*html$")
- :title "My homepage"
+ :title "k32's notebook"
  :description "A collection of articles in RSS"
  :builder 'webfeeder-make-rss)
 
