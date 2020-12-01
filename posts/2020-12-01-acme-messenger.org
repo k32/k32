@@ -1,0 +1,54 @@
+#+TITLE: This messenger respects your privacy
+#+DATE: 2020-12-01
+
+Today I want to introduce Acme, a new instant messenger with E2E
+encryption and blast processing, that respects your privacy! It's not
+just for everyone, it is specifically targeted towards journalists who
+need to communicate with their sources, dissidents and other people
++whose metadata and social graph is especially interesting to
+honeypot+ in need of strong privacy. Forget about obsolete
+decentralized stuff like GPG, and install AcmeIM from Grahma Play
+Store today.
+
+* Mobile number
+
+Unlike obsolete encryption systems, we require mobile number. Never
+mind that in many countries around the world SIM-cards can be bought
+only after presenting a legal ID, and that mobile networks themselves
+have all-encompassing LI (Lawful Interception) interfaces by
+design. Security experts say it's very safe. Do you guys not have
+phones?
+
+* Centralized
+
+Our messenger uses client-server approach. (You can't run your own
+server, BTW.) This allows us to iterate faster than the obsolete
+p2p/federated networks. We promise not to store any metadata on our
+servers. Remember, end-to-end encryption = safe.
+
+* Grahma play store
+
+You can only download the client from the Grahma play store, so we can
+iterate faster. Grahma inc. is the champion of privacy and freedom, so
+we heavily rely on their APIs as well. It also helps us to update Acme
+client automatically. Suppose some so called experts "audited" certain
+version of Acme. By doing that, they could invite users to stick to
+the old version and hinder our ability to evolve, and put our users in
+risk. So we don't allow that.
+
+P.S. Grahma and friends /certainly/ don't have the list of apps
+running on your phone, so it's safe to install AcmeIM without drawing
+any attention.
+
+* Obsolete technologies
+
+There are old cryptography tools that don't need centralized server,
+or mobile phone. They are modular enough, so the cyphertext can be
+embedded in DCT coefficients of cat pictures posted on @channel. In
+the current year this approach is a joke. It is extremely user
+unfriendly.
+
+Security experts proclaim these old tools obsolete and can't wait
+until they die. Don't use them and download AcmeIM today!
+
+/tagged: humor/

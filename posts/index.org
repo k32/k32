@@ -10,6 +10,7 @@
 * Posts
 
 *** 2020
+ - [[file:2020-12-01-acme-messenger.org][This messenger respects your privacy]]
  - [[file:2019-11-01-troubleshooting.org][How to troubleshoot anything without a clue]]
 *** 2019
  - [[file:2019-10-11-hello-world.org][Trace-based testing]]
