@@ -12,12 +12,17 @@ Store today.
 
 * Mobile number
 
-Unlike obsolete encryption systems, we require mobile number. Never
-mind that in many countries around the world SIM-cards can be bought
-only after presenting a legal ID, and that mobile networks themselves
-have all-encompassing LI (Lawful Interception) interfaces by
-design. Security experts say it's very safe. Do you guys not have
-phones?
+Unlike obsolete encryption systems, we require mobile phone to
+register in our system. Your account is tied to your phone
+number. Never mind that in many countries around the world SIM-cards
+can be bought only after presenting a legal ID, and that mobile
+networks themselves have all-encompassing LI (Lawful Interception)
+interfaces by design. Also let's ignore the fact that mobile networks
+still heavily rely on SS7 protocol stack from the 70s, with the
+security model based on gentlemen's agreement. Some people claim that
+words "mobile network" and "secure" can't be used in the same
+sentence, but our security experts think it's very safe. Do you guys
+not have phones?
 
 * Centralized
 
@@ -31,10 +36,10 @@ servers. Remember, end-to-end encryption = safe.
 You can only download the client from the Grahma play store, so we can
 iterate faster. Grahma inc. is the champion of privacy and freedom, so
 we heavily rely on their APIs as well. It also helps us to update Acme
-client automatically. Suppose some so called experts "audited" certain
-version of Acme. By doing that, they could invite users to stick to
-the old version and hinder our ability to evolve, and put our users in
-risk. So we don't allow that.
+client automatically. Suppose some so-called experts "audited" certain
+version of Acme. By doing that, they basically invited users to stick
+to the old version and hinder our ability to evolve, and put our users
+in risk. So we don't allow that.
 
 P.S. Grahma and friends /certainly/ don't have the list of apps
 running on your phone, so it's safe to install AcmeIM without drawing
