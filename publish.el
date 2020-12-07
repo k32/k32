@@ -57,10 +57,6 @@
                     :base-directory "./posts"
                     :publishing-directory ,out-dir)
                   my-org-publish-props)
-        ,(-concat `("drafts"
-                    :base-directory "./drafts"
-                    :publishing-directory "./drafts-out")
-                  my-org-publish-props)
         ("static"
          :publishing-function org-publish-attachment
          :publishing-directory "./out"

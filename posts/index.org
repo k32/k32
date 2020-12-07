@@ -4,6 +4,7 @@
 * Links
 
 + [[https://blog.erlang.moe/atom.xml][Atom feed]]
++ [[https://sr.ht/~k32/][My sourcehut]]
 + [[https://github.com/k32][My github]]
 + Found a mistake? Just make a PR here: https://github.com/k32/k32
 
@@ -14,3 +15,26 @@
  - [[file:2019-11-01-troubleshooting.org][How to troubleshoot anything without a clue]]
 *** 2019
  - [[file:2019-10-11-hello-world.org][Trace-based testing]]
+
+* Other stuff
+
+** My projects, current and past
+
++ [[https://git.sr.ht/~k32/libtx][LibTx]] my experiments with formal methods
++ [[https://git.sr.ht/~k32/anvl][anvl]] neon genesis rebar3
++ [[https://github.com/k32/QFL][QFL]] joke esoteric language that demonstrates pure functional I/O
+   without monads and uniqueness types
+
+** Sites I read
+
++ https://jepsen.io/analyses
++ http://okmij.org/ftp/
++ https://blog.acolyer.org
++ http://www.philipzucker.com/
++ https://erikbern.com/
+
+** Fiction
+
+Cringe alert!
+
++ [[file:%D0%BD%D0%B8%D0%B4%D0%B6%D1%83.org][Ниджу]]
