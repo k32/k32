@@ -1,0 +1,15 @@
+#+OPTIONS: num:nil
+
+* Sites I read
+
++ https://jepsen.io/analyses
++ http://okmij.org/ftp/
++ https://blog.acolyer.org
++ http://www.philipzucker.com/
++ https://erikbern.com/
+
+* Fiction
+
+Cringe alert!
+
++ [[file:%D0%BD%D0%B8%D0%B4%D0%B6%D1%83.org][Ниджу]]
