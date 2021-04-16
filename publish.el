@@ -39,7 +39,8 @@
         :sitemap-sort-files chronologically
         :html-link-home "index.html"
         :html-head "<link rel=\"stylesheet\" type=\"text/css\" href=\"default.css\"/>
-<link href=\"atom.xml\" type=\"application/atom+xml\" rel=\"alternate\" title=\"k32's notebook\"/>"
+<link href=\"atom.xml\" type=\"application/atom+xml\" rel=\"alternate\" title=\"k32's notebook\"/>
+<meta http-equiv=\"Permissions-Policy\" content=\"interest-cohort=()\"/>"
         :html-head-include-default-style nil
         :html-head-extra nil
         :html-preamble nil
