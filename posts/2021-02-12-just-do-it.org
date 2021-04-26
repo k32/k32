@@ -1,0 +1,20 @@
+#+TITLE: Planning vs. prototyping
+#+DATE: 2021-02-12
+
+The process of software engineering has two aspects: creative and
+social. Neglecting the social aspect leads to products that nobody can
+understand, support or use. Neglecting the creative aspect leads to
+total waste of resources and products that never ship. In this post I
+propose a simple formula that helps to strike the right balance
+between the two.
+
+Let $T_i$ is time needed to write the code demonstrating the approach,
+$T_r$ is time needed to rollback the code, if the approach does not
+work, and $T_d$ is time needed to discuss whether the approach will
+work, then the following inequality must hold:
+
+$$
+T_d \leq T_i + T_r
+$$
+
+/tagged: rant/
