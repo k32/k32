@@ -8,6 +8,13 @@
 (require 'erlang)
 (require 'dash)
 
+(setq org-plantuml-jar-path "/usr/share/plantuml/plantuml.jar")
+
+(setq org-confirm-babel-evaluate nil)
+
+(org-babel-do-load-languages 'org-babel-load-languages
+                             '((emacs-lisp . t) (gnuplot . t) (plantuml . t) (dot . t)))
+
 (setq make-backup-files nil)
 
 (defun my-format-ref (refs) "org")
@@ -63,6 +70,11 @@
          :publishing-directory "./out"
          :base-directory "./static"
          :base-extension "css\\|ico\\|jpeg\\|png")
+        ("post-images"
+         :publishing-function org-publish-attachment
+         :publishing-directory "./out"
+         :base-directory "./posts"
+         :base-extension "jpeg\\|png")
         ("blog"
          :components ("posts" "static"))))
 

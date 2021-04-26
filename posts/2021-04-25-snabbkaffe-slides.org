@@ -8,6 +8,9 @@
 #+latex_header: \usetheme{Boadilla}
 #+latex_header: \linespread{1}
 #+latex_header: \usepackage{tikz}
+
+This is an HTML version of snabbkaffe presentation slides.
+
 * DONE Background and motivation
 
 ** What is snabbkaffe
