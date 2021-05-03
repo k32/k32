@@ -5,14 +5,123 @@ and I figured that I may start publishing my scattered notes. There is
 a lot of interesting stuff going on down there. I will update this
 post with more details.
 
-Disclaimer: I am not an OTP dev, and not a mnesia dev, thus anything
-that will be posted here will be derived from reading (the poorly
-documented) code and my own experiments. So THE BLOG POST IS PROVIDED
-"AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, and so on.
+Disclaimer: I am not an OTP dev, and not a mnesia dev. Anything
+that will be posted here will be derived from reading the code.
 
-* TODO Transaction flow
+* Transaction
 
-#+BEGIN_SRC plantuml :file mnesia_simplified.png
+Transaction fun runs in the same process that calls =mnesia:transaction= function.
+Most of the work during the commit stage is also done in the user process.
+
+#+begin_src plantuml :file mnesia_trans.svg
+participant tx
+participant mnesia_tm
+
+tx -> tx++ : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia.erl#L418 mnesia:transaction]]
+tx -> tx++ : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L761 mnesia_tm:transaction]]
+
+== prepare transaction ==
+  tx -> mnesia_tm : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L777 start_outer]]
+    note over mnesia_tm: [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L232 Create a fresh ets bag for the shadow store and a Tid]]
+  tx <-- mnesia_tm : link
+  tx <- mnesia_tm : {new_tid, Tid, Etab}
+
+== run transaction ==
+  tx -> tx : update mnesia_activity_store
+  tx -> tx ++ : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L841 mnesia_tm:apply_fun]]
+    tx -> tx++ #LightBlue : Apply transaction fun
+
+... Read and write records, see "reads and writes" ...
+
+    return Ret
+
+== commit ==
+
+    tx -> tx++ : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L1094 mnesia_tm:t_commit]]
+
+... See "commit process in detail" ...
+
+    return [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L844 do_commit]]
+
+    note over tx : If result wasn't do_commit\n the tx would restart\n transaction here
+  return Ret
+return "{atomic, Ret}"
+return "{atomic, Ret}"
+#+end_src
+
+#+RESULTS:
+[[file:mnesia_trans.svg]]
+
+* TODO Commit process in detail
+
+Commit procedure also mostly happens in the caller process.
+
+#+begin_src plantuml :file mnesia_subscr.svg
+box "Original node" #White
+  participant tx as tx
+  participant mnesia_tm as tm
+  participant mnesia_locker as locker
+  participant mnesia_recover as recover
+end box
+
+box "Participant A" #LightBlue
+  participant mnesia_tm as tm_a
+  participant mnesia_locker as locker_a
+  participant mnesia_recover as recover_a
+end box
+
+tx -> tx ++ : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L1094 mnesia_tm:t_commit]]
+  tx -> tx : mnesia_tm:intercept_friends
+
+  tx -> tx : mnesia_tm:arrange
+
+  tx -> tx ++ : multi_commit
+    note over tx : Mnesia has 4 different commit protocols.\nWe only consider [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L1380 sym_trans]] here.
+  return do_commit
+return do_commit
+#+end_src
+
+#+RESULTS:
+[[file:mnesia_subscr.svg]]
+
+** Arrange
+
+Arrange function is pretty convoluted.
+Thankfully, it only uses the local data from the transaction store and the schema.
+It creates a tuple of the following type:
+
+#+begin_src erlang
+mnesia:transaction(fun() -> mnesia:write({foo, 1, 2}), mnesia:write({foo, 3, 3}) end).
+....
+{2,
+ #prep{protocol = sym_trans,
+       records = [#commit{node = 'bar@localhost',
+                          decision = presume_commit,
+                          ram_copies = [{{foo,1},{foo,1,2},write},
+                                        {{foo,3},{foo,3,3},write}],
+                          disc_copies = [],disc_only_copies = [],ext = [],
+                          schema_ops = []},
+                  #commit{node = 'foo@localhost',decision = presume_commit,
+                          ram_copies = [{{foo,1},{foo,1,2},write},
+                                        {{foo,3},{foo,3,3},write}],
+                          disc_copies = [],disc_only_copies = [],ext = [],
+                          schema_ops = []}],
+       prev_tab = foo,
+       prev_types = [{'bar@localhost',ram_copies},
+                     {'foo@localhost',ram_copies}],
+       prev_snmp = [],
+       types = [{'bar@localhost',ram_copies},
+                {'foo@localhost',ram_copies}],
+       majority = [],
+       sync = false}}
+#+end_src
+
+The first element is the number of write/delete ops in the transaction.
+This number is used to determine whether the transaction is r/o or r/w.
+
+* TODO Transactional reads and writes
+
+#+BEGIN_SRC plantuml :file mnesia_simplified.svg
 == mnesia:write(K) ==
 
 tx -> a : get write lock(K)
@@ -31,15 +140,15 @@ tx -> a : release locks
 tx -> b : release locks
 #+END_SRC
 
+* TODO Locker
+
+* TODO Schema
+
+* TODO Transaction aborts and restarts
+
 * TODO Scalability
 
-As should be evident from the above diagram, transaction latency is
-expected to grow when the number of nodes in the cluster
-grows. Indeed, this effect was observed in the test with the help of
-[[https://www.man7.org/linux/man-pages/man8/tc-netem.8.html][netem]].
-
-Graph of Mnesia vs. "the new thing" prototype we're working on:
-
-[[file:rlog_comparison.png]]
+As should be evident from the above diagram, transaction latency is expected to grow when the number of nodes in the cluster grows.
+Indeed, we observed this effect in the test with the help of [[https://www.man7.org/linux/man-pages/man8/tc-netem.8.html][netem]].
 
 #+DATE: 2021-04-26

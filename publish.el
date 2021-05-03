@@ -69,12 +69,12 @@
          :publishing-function org-publish-attachment
          :publishing-directory "./out"
          :base-directory "./static"
-         :base-extension "css\\|ico\\|jpeg\\|png")
+         :base-extension "css\\|ico\\|jpeg\\|png\\|svg")
         ("post-images"
          :publishing-function org-publish-attachment
          :publishing-directory "./out"
          :base-directory "./posts"
-         :base-extension "jpeg\\|png")
+         :base-extension "jpeg\\|png\\|svg")
         ("blog"
          :components ("posts" "static"))))
 
