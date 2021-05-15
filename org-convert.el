@@ -7,6 +7,7 @@
 (require 'font-lock)
 (require 'erlang)
 
+;; Source code colouring
 (custom-set-faces
  '(default ((t (:foreground "#ffffff" :background "black"))))
  '(font-lock-builtin-face ((t (:foreground "#729fcf"))))
@@ -31,26 +32,35 @@
 
 (setq htmlize-use-rgb-map 'force)
 
-(setq org-html-validation-link nil)
-(setq org-auto-sitemap nil)
-(setq org-sitemap-title "k32's notebook")
-(setq org-sitemap-filename "index.org")
-(setq org-sitemap-sort-files 'chronologically)
+;;;; Settings for export:
+
+;; Remove bloat:
+(setq org-html-validation-link nil
+      org-html-head-include-default-style nil
+      org-html-head-extra nil
+      org-html-preamble nil
+      org-html-head-include-scripts nil
+      org-export-time-stamp-file nil)
+
+;; Remove features I don't need:
+(setq org-auto-sitemap nil
+      org-export-with-toc nil
+      org-export-with-author nil
+      org-export-with-creator nil
+      org-export-with-email nil
+      org-export-with-section-numbers nil)
+
+;; Export options:
 (setq org-html-link-home "index.html")
 (setq org-html-head "<link rel=\"stylesheet\" type=\"text/css\" href=\"default.css\"/>
 <link href=\"atom.xml\" type=\"application/atom+xml\" rel=\"alternate\" title=\"k32's notebook\"/>
 <meta http-equiv=\"Permissions-Policy\" content=\"interest-cohort=()\"/>")
-(setq org-html-head-include-default-style nil)
-(setq org-html-head-extra nil)
-(setq org-html-preamble nil)
-(setq org-html-head-include-scripts nil)
-(setq org-html-postamble nil)
 ;(setq org-html-htmlize-output-type 'css)
-(setq org-export-with-toc nil)
-(setq org-export-with-author nil)
-(setq org-export-with-email nil)
-(setq org-export-with-section-numbers nil)
 
+;; Important settings for getting dates in the Atom feed right:
+(setq org-export-with-date t)
+
+;;;;; Do export:
 (let* ((orig-file (car command-line-args-left))
        (org-file (concat "tmp/" (file-name-nondirectory orig-file)))
        (out-file (file-truename (car (cdr command-line-args-left)))))

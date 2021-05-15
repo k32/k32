@@ -8,10 +8,6 @@ all: $(OUTDIR) $(POSTS) $(OUTDIR)/atom.xml static
 $(OUTDIR):
 	git clone git@github.com:k32/k32.github.io.git $(OUTDIR)
 
-$(OUTDIR)/.last_update: $(OUTDIR)/*
-	cd $(OUTDIR) && git add -A && git commit -m "publish"
-	touch out/.last_update
-
 ## Posts:
 $(OUTDIR)/%.html: posts/%.org ./org-convert.el | $(OUTDIR)
 	./org-convert.el $< $@
