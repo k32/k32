@@ -17,8 +17,8 @@
 
 (setq make-backup-files nil)
 
-(defun my-format-ref (refs) "org")
-(advice-add 'org-export-format-reference :override 'my-format-ref)
+;(defun my-format-ref (refs) "org")
+;(advice-add 'org-export-format-reference :override 'my-format-ref)
 
 (custom-set-faces
  '(default ((t (:foreground "#ffffff" :background "black"))))

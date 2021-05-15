@@ -46,6 +46,10 @@ code {
     font-family: monospace;
 }
 
+blockquote {
+    background-color: #D0D0D0;
+}
+
 h1 {
     font-size: 24px;
 }
@@ -92,6 +96,7 @@ pre.src {
   position: relative;
   overflow: visible;
   padding-top: 1.2em;
+  overflow-x: auto;
 }
 pre.src:before {
   display: none;
