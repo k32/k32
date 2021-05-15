@@ -1,4 +1,5 @@
 #+TITLE: Mnesia internals
+#+options: ^:nil
 
 I have been studying Mnesia internals for my current job assignment,
 and I figured that I may start publishing my scattered notes. There is
@@ -27,7 +28,7 @@ tx -> tx++ : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia
   tx <- mnesia_tm : {new_tid, Tid, Etab}
 
 == run transaction ==
-  tx -> tx : update mnesia_activity_store
+  tx -> tx : update mnesia_activity_state
   tx -> tx ++ : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L841 mnesia_tm:apply_fun]]
     tx -> tx++ #LightBlue : Apply transaction fun
 
@@ -52,9 +53,36 @@ return "{atomic, Ret}"
 #+RESULTS:
 [[file:mnesia_trans.svg]]
 
+*** What's inside mnesia_activity_state?
+
+=mnesia_activity_state= is a process dictionary variable in the transaction process.
+
+#+begin_src erlang
+{mnesia,
+ #tid{counter = 13, pid = <0.125.0>},
+ #tidstore{store = #Ref<0.3426409509.1642725377.222071>,
+           up_stores = [],
+           level = 1
+          }}
+#+end_src
+
+Counter is the Lamport clock (kept by =mnesia_tm= process) /at the beginning/ of the transaction.
+
+*** What's inside the tidstore table?
+
+#+begin_src erlang
+[{{bar,1},{bar,1,2},write},
+ {{foo,3},{foo,3,3}, write},
+ {{locks,foo,3}, write},
+ {{locks,bar,1}, write},
+ {nodes, 'foo@me-emq'},
+ {nodes, 'bar@me-emq'}]
+#+end_src
+
 * TODO Commit process in detail
 
 Commit procedure also mostly happens in the caller process.
+This process acts as the coordinator.
 
 #+begin_src plantuml :file mnesia_subscr.svg
 box "Original node" #White
@@ -75,8 +103,59 @@ tx -> tx ++ : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesi
 
   tx -> tx : mnesia_tm:arrange
 
-  tx -> tx ++ : multi_commit
+  tx -> tx ++ : mnesia_tm:multi_commit(Prep)
     note over tx : Mnesia has 4 different commit protocols.\nWe only consider [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L1380 sym_trans]] here.
+
+    tx -> tx ++ : mnesia_tm:commit_nodes
+      note over tx : Get list of nodes that contain\ndisk and ram copies\nof tables affected by\nthe transaction
+    return {DiskNs, RamNs}
+
+    tx -> tx : mnesia_checkpoint:tm_enter_pending
+
+== 1st phase of 2PC ==
+    tx -> tx ++ : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L2071 mnesia_tm:ask_commit]]
+      loop for each #commit record in #prep
+        tx -\ tm_a : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L248 ask_commit]]
+        tm_a -> tm_a : mnesia_checkpoint:tm_enter_pending
+        tx /- tm_a : {vote_yes, Tid}
+      end
+
+      tx -> tx : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L2097 receive nodes' votes and derive outcome]]
+
+== 2nd phase of 2PC ==
+    note over tx : broadcast the outcome to\n the participants
+    loop for each participant node
+        tx -\ tm_a : {Tid, Outcome = do_commit}
+        activate tm_a
+        note over tm_a : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L273 doit_loop]]
+        note over tm_a : lookup #participant record\n from the state variable
+    end
+
+    tx -> tx : mnesia_recover:note_decision(Tid, committed)
+
+    tx -> tx ++ : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L1777 mnesia_tm:do_dirty]]
+      note over tx: Mnesia logs #commit record\nfor the local node.\nSee "Arrange" chapter below
+      tx -> tx : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_log.erl#L227 mnesia_log:log]](#commit{})
+
+        tm_a -> tm_a : mnesia_log:log(Commit)
+        tm_a -> tm_a : mnesia_recover:note_decision(Tid, committed)
+
+== Post-commit actions ==
+    tx -> tx ++ : mnesia_tm:do_commit
+
+
+      return ?
+    return ?
+
+    tm_a -> tm_a : mnesia_tm:do_commit(Tid, Commit)
+
+== Cleanup ==
+    tx -> locker : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_locker.erl#L183 release_tid]]
+    tm_a -> locker_a : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_locker.erl#L183 release_tid]]
+
+
+    tx -\ tm : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L377 delete_transaction]]
+    return {WaitFor, Local}
   return do_commit
 return do_commit
 #+end_src
@@ -119,9 +198,19 @@ mnesia:transaction(fun() -> mnesia:write({foo, 1, 2}), mnesia:write({foo, 3, 3})
 The first element is the number of write/delete ops in the transaction.
 This number is used to determine whether the transaction is r/o or r/w.
 
+** What is stored in the mnesia_tm's state?
+
 * TODO Transactional reads and writes
 
 #+BEGIN_SRC plantuml :file mnesia_simplified.svg
+box "node a"
+  participant tx
+  participant mnesia_locker as a
+end box
+box "node b"
+  participant mnesia_locker as b
+end box
+
 == mnesia:write(K) ==
 
 tx -> a : get write lock(K)
