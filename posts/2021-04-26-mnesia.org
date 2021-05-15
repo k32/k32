@@ -95,7 +95,6 @@ end box
 box "Participant A" #LightBlue
   participant mnesia_tm as tm_a
   participant mnesia_locker as locker_a
-  participant mnesia_recover as recover_a
 end box
 
 tx -> tx ++ : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L1094 mnesia_tm:t_commit]]
@@ -118,17 +117,19 @@ tx -> tx ++ : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesi
         tx -\ tm_a : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L248 ask_commit]]
         tm_a -> tm_a : mnesia_checkpoint:tm_enter_pending
         tx /- tm_a : {vote_yes, Tid}
-      end
 
-      tx -> tx : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L2097 receive nodes' votes and derive outcome]]
+        tm_a -> tm_a : Add commit record from tx\nto the state gb_tree
+      end
+    return {WaitFor, Local}
+
+    tx -> tx : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L2097 receive nodes' votes and derive outcome]]
 
 == 2nd phase of 2PC ==
     note over tx : broadcast the outcome to\n the participants
     loop for each participant node
         tx -\ tm_a : {Tid, Outcome = do_commit}
-        activate tm_a
         note over tm_a : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L273 doit_loop]]
-        note over tm_a : lookup #participant record\n from the state variable
+        note over tm_a : lookup #participant record\n from the state gb_tree
     end
 
     tx -> tx : mnesia_recover:note_decision(Tid, committed)
@@ -141,9 +142,13 @@ tx -> tx ++ : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesi
         tm_a -> tm_a : mnesia_recover:note_decision(Tid, committed)
 
 == Post-commit actions ==
-    tx -> tx ++ : mnesia_tm:do_commit
-
-
+      tx -> tx ++ : mnesia_tm:do_commit
+        note over tx: Dump the ops to the DB,\n notify subscribers,\n etc.
+        tx -> tx : mnesia_tm:do_snmp
+        tx -> tx : update_ram_copies
+        tx -> tx : update_disc_copies
+        tx -> tx : mnesia_tm:do_update_ext
+        tx -> tx : mnesia_subscr:report_activity
       return ?
     return ?
 
@@ -155,9 +160,14 @@ tx -> tx ++ : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesi
 
 
     tx -\ tm : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L377 delete_transaction]]
-    return {WaitFor, Local}
   return do_commit
 return do_commit
+
+group remote cleanup
+    tm_a -> tm_a : mnesia_tm:transaction_terminated
+    tm_a -> tm_a : mnesia_checkpoint:tm_exit_pending(Tid)
+    note over tm_a: Update the Lamport clock
+end
 #+end_src
 
 #+RESULTS:
@@ -199,6 +209,32 @@ The first element is the number of write/delete ops in the transaction.
 This number is used to determine whether the transaction is r/o or r/w.
 
 ** What is stored in the mnesia_tm's state?
+
+#+begin_src erlang
+#state{
+    coordinators = {0,nil},
+    participants = %% Note: this field is a `gb_tree'. So don't mind stuff in the outer tuple
+        {1,
+         {#tid{counter = 32,pid = <11304.125.0>},
+          #participant{
+              tid = #tid{counter = 32,pid = <11304.125.0>},
+              pid = nopid,
+              commit =
+                  #commit{
+                      node = 'bar@localhost',decision = presume_commit,
+                      ram_copies =
+                          [{{foo,1},{foo,1,2},write},{{foo,3},{foo,3,3},write}],
+                      disc_copies = [],disc_only_copies = [],ext = [],
+                      schema_ops = []},
+              disc_nodes = [],
+              ram_nodes = ['foo@localhost','bar@localhost'],
+              protocol = sym_trans},
+          nil,nil}},
+    supervisor = <0.99.0>,blocked_tabs = [],dirty_queue = [],
+    fixed_tabs = []
+  }
+#+end_src
+
 
 * TODO Transactional reads and writes
 
