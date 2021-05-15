@@ -1,18 +1,17 @@
 #+TITLE: Mnesia internals
 #+options: ^:nil
 
-I have been studying Mnesia internals for my current job assignment,
-and I figured that I may start publishing my scattered notes. There is
-a lot of interesting stuff going on down there. I will update this
-post with more details.
+I've been studying Mnesia internals lately, and I figured I may start publishing my scattered notes.
+I will keep updating this post with more details.
 
-Disclaimer: I am not an OTP dev, and not a mnesia dev. Anything
-that will be posted here will be derived from reading the code.
+Disclaimer: I am not an OTP dev, and not a mnesia dev.
+Anything that will be posted here will be derived from reading the code.
 
 * Transaction
 
 Transaction fun runs in the same process that calls =mnesia:transaction= function.
-Most of the work during the commit stage is also done in the user process.
+Most of the commit coordination work is also done in the caller process.
+This helps mnesia scale.
 
 #+begin_src plantuml :file mnesia_trans.svg
 participant tx
@@ -58,12 +57,15 @@ return "{atomic, Ret}"
 =mnesia_activity_state= is a process dictionary variable in the transaction process.
 
 #+begin_src erlang
+mnesia:transaction(fun() -> mnesia:write({bar, 1, 2}), mnesia:write({foo, 3, 3}) end).
+....
+
 {mnesia,
  #tid{counter = 13, pid = <0.125.0>},
  #tidstore{store = #Ref<0.3426409509.1642725377.222071>,
            up_stores = [],
            level = 1
-          }}
+           }}
 #+end_src
 
 Counter is the Lamport clock (kept by =mnesia_tm= process) /at the beginning/ of the transaction.
@@ -71,6 +73,10 @@ Counter is the Lamport clock (kept by =mnesia_tm= process) /at the beginning/ of
 *** What's inside the tidstore table?
 
 #+begin_src erlang
+mnesia:transaction(fun() -> mnesia:write({bar, 1, 2}), mnesia:write({foo, 3, 3}) end).
+....
+
+
 [{{bar,1},{bar,1,2},write},
  {{foo,3},{foo,3,3}, write},
  {{locks,foo,3}, write},
@@ -155,8 +161,8 @@ tx -> tx ++ : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesi
     tm_a -> tm_a : mnesia_tm:do_commit(Tid, Commit)
 
 == Cleanup ==
-    tx -> locker : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_locker.erl#L183 release_tid]]
-    tm_a -> locker_a : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_locker.erl#L183 release_tid]]
+    tx -\ locker : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_locker.erl#L183 release_tid]]
+    tm_a -\ locker_a : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_locker.erl#L183 release_tid]]
 
 
     tx -\ tm : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L377 delete_transaction]]
@@ -182,6 +188,7 @@ It creates a tuple of the following type:
 #+begin_src erlang
 mnesia:transaction(fun() -> mnesia:write({foo, 1, 2}), mnesia:write({foo, 3, 3}) end).
 ....
+
 {2,
  #prep{protocol = sym_trans,
        records = [#commit{node = 'bar@localhost',
@@ -211,6 +218,9 @@ This number is used to determine whether the transaction is r/o or r/w.
 ** What is stored in the mnesia_tm's state?
 
 #+begin_src erlang
+mnesia:transaction(fun() -> mnesia:write({foo, 1, 2}), mnesia:write({foo, 3, 3}) end).
+....
+
 #state{
     coordinators = {0,nil},
     participants = %% Note: this field is a `gb_tree'. So don't mind stuff in the outer tuple
@@ -253,16 +263,6 @@ tx -> a : get write lock(K)
 tx -> b : get write lock(K)
 tx <- b : ok
 tx <- a : ok
-
-== commit transaction ==
-
-tx -> a : ask for commit(TX)
-tx -> b : ask for commit(TX)
-tx <- b : ok
-tx <- a : ok
-tx --> tx : commit
-tx -> a : release locks
-tx -> b : release locks
 #+END_SRC
 
 * TODO Locker

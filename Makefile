@@ -1,19 +1,50 @@
-.PHONY: render
-render: out/.git
-	emacs -Q -batch -l publish.el
+POSTS=$(patsubst posts/%.org,out/%.html,$(wildcard posts/*.org))
+OUTDIR=out
+TMPDIR=tmp
 
-out/.git:
-	git clone git@github.com:k32/k32.github.io.git out
+.PHONY: all
+all: $(OUTDIR) $(POSTS) $(OUTDIR)/atom.xml static
 
+$(OUTDIR):
+	git clone git@github.com:k32/k32.github.io.git $(OUTDIR)
+
+$(OUTDIR)/.last_update: $(OUTDIR)/*
+	cd $(OUTDIR) && git add -A && git commit -m "publish"
+	touch out/.last_update
+
+## Posts:
+$(OUTDIR)/%.html: posts/%.org ./org-convert.el | $(OUTDIR)
+	./org-convert.el $< $@
+
+$(OUTDIR)/atom.xml: $(POSTS)
+	./make-feed.el $(OUTDIR)
+
+## Static:
+PNGS ?= $(patsubst posts/%, $(OUTDIR)/%, $(wildcard $(TMPDIR)/*.png))
+$(OUTDIR)/%.png: $(TMPDIR)/%.png | $(POSTS)
+	convert -strip $< $@
+
+SVGS ?= $(patsubst posts/%,out/%,$(wildcard $(TMPDIR)/*.svg))
+$(OUTDIR)/%.svg: $(TMPDIR)/%.svg cleanup-svg.xsl | $(POSTS)
+	xsltproc cleanup-svg.xsl $< > $@
+
+STATIC = $(patsubst static/%, $(OUTDIR)/%, $(wildcard static/*))
+$(OUTDIR)/%: static/% | $(OUTDIR)
+	cp $< $@
+
+.PHONY: static
+static: $(PNGS) $(SVGS) $(STATIC)
+
+# Special targets
 out/.last_update: out/*
 	cd out && git add -A && git commit -m "publish"
 	touch out/.last_update
 
 .PHONY: publish
-publish: out/.last_update
-	cd out && git push
+publish: all out/.last_update
+	cd $(OUTDIR) && git push
 
 .PHONY: clean
 clean:
-	rm ~/.org-timestamps/*
-	rm -rf out
+	rm -rf $(OUTDIR) || true
+	rm -rf $(TMPDIR) || true

@@ -1,0 +1,257 @@
+#+TITLE: On the unreasonable effectiveness of the transaction log replay
+
+Having worked on database engines using log-based replication, I learned that transaction log has tremendous healing powers.
+Replica lost power and some writes got lost in the disk cache?
+Replay 10 minutes of the transaction log and the replica is healed.
+A race condition happens in the locker, so two replicas receive transactions during bootstrap in a slightly different order?
+Depending on the situation, this can be healed by tlog replay too.
+
+Why does it work, though? And when does it stop working?
+
+I tried to find the answer using formal mathematical proof in Coq.
+Here's what I came up with.
+
+* Definition of key-value storage
+
+We start from defining an abstraction for the database storage engine:
+
+#+begin_src coq
+Section defns.
+  Context {K V : Type} `{HKeq_dec : EqDec K}.
+
+  Class Storage t : Type :=
+    { new : t;
+      put : K -> V -> t -> t;
+      get : K -> t -> option V;
+      keys : t -> list K;
+      delete : K -> t -> t;
+
+      (* Axioms: *)
+      new_empty : ∀ k, get k new = None;
+      keep : forall s k v, get k (put k v s) = Some v;
+      distinct : forall s k1 k2 v2,
+          k1 ≠ k2 ->
+          get k1 s = get k1 (put k2 v2 s);
+      delete_keep : ∀ s k, get k (delete k s) = None;
+      delete_distinct : ∀ s k1 k2,
+          k1 ≠ k2 ->
+          get k1 s = get k1 (delete k2 s);
+      keys_some : ∀ s k,
+          In k (keys s) ↔ ∃ v, get k s = Some v;
+    }.
+End defns.
+#+end_src
+
+Let's split this code into small parts.
+
+#+begin_src coq
+Section defns.
+  Context {K V : Type} `{HKeq_dec : EqDec K}.
+#+end_src
+
+In the above snippet we define some type variables.
+Variables =K= and =V= are used to define types of keys and values, respectively.
+=HKeq_dec= variable may look confusing, but basically it specifies the requirement that the function comparing two keys should be "well-behaved".
+
+Let's take a closer look at the methods.
+
+1. =new= creates a fresh empty storage of type =t=:
+
+   #+begin_src coq
+     Class Storage t : Type :=
+       { new : t;
+   #+end_src
+
+2. =put key value storage= updates the value of =key= in the =storage=.
+   (More precisely, it returns a new storage with the key updated)
+
+   #+begin_src coq
+      put : K -> V -> t -> t
+   #+end_src
+
+3. =get key storage= retrieves a value from the storage, returning either =Some value= or =None=
+
+   #+begin_src coq
+      get : K -> t -> option V
+   #+end_src
+
+4. =keys storage= returns the list of keys in the storage:
+
+   #+begin_src coq
+      keys : t -> list K
+   #+end_src
+
+5. Finally, =delete key storage= deletes the key from the storage:
+
+   #+begin_src coq
+      delete : K -> t -> t
+   #+end_src
+
+Nothing unexpected so far, =Storage= class looks like a bog-standard purely functional container interface.
+
+Now to the interesting part.
+Coq allows to enforce certain relationships between the methods, that any instance of the =Storage= must guarantee.
+Let's go through them:
+
+1. =new_empty= property tells us that the newly created storage must be empty.
+   More precisely, running =get k new= for any key =k= must return =None=:
+
+   #+begin_src coq
+      new_empty : ∀ k, get k new = None
+   #+end_src
+
+2. =keep= axiom tells how =put= operations affect the result of the subsequent =get= operation on the same key:
+   you get what you put to the storage.
+
+   #+begin_src coq
+      keep : ∀ s k v, get k (put k v s) = Some v
+   #+end_src
+
+3. =distinct= axiom tells that =put= operations should not have unexpected side-effects: they only modify one key:
+
+   #+begin_src coq
+      distinct : ∀ s k1 k2 v2,
+          k1 ≠ k2 ->
+          get k1 s = get k1 (put k2 v2 s)
+   #+end_src
+
+4. =delete_keep= is similar to the =keep= axiom, but for deletes:
+
+   #+begin_src coq
+      delete_keep : ∀ s k, get k (delete k s) = None
+   #+end_src
+
+5. =delete_distinct= is, again, similar to =distinct=, but for deletes:
+
+   #+begin_src coq
+      delete_distinct : ∀ s k1 k2,
+          k1 ≠ k2 ->
+          get k1 s = get k1 (delete k2 s)
+   #+end_src
+
+6. Finally, =keys_some= axiom tells that =get key= operation returns a value iff the =key= is a member of the list returned by =keys= method:
+
+   #+begin_src coq
+      keys_some : ∀ s k,
+          In k (keys s) ↔ ∃ v, get k s = Some v
+   #+end_src
+
+Hopefully, these properties sound intuitive.
+
+
+* Database equality
+
+Now let's define equality of =Storage= instances.
+We consider two databases equal if they contain the same set of keys and values:
+
+#+begin_src coq
+Section Equality.
+  Context {K V} {T1 T2} `{@Storage K V T1, Storage K V T2}.
+
+  Inductive s_eq (s1 : T1) (s2 : T2) :=
+  | s_eq_ : (forall k, get k s1 = get k s2) → s_eq s1 s2.
+End Equality.
+
+Notation "s1 =s= s2" := (s_eq s1 s2) (at level 50).
+#+end_src
+
+Once again, I use variables =K= and =V= to define types of keys and values.
+=T1= and =T2= are types of the key-value storage backends.
+They can be different, so our definition is backend-agnostic.
+
+Note that our definition (==s==) is not equivalent to the standard Coq's =eq=.
+
+* Simple proofs
+
+Let's play with our definitions to make sure they are useful.
+
+We start from the most unimpressive lemma: any storage is equal to itself:
+
+#+begin_src coq
+Lemma s_eq_self : ∀ (s : T), s =s= s.
+Proof.
+  firstorder.
+Qed.
+#+end_src
+
+It's so easy, that Coq manages to prove it completely automatically.
+
+Now let's prove that listing keys in the new storage returns an empty list:
+
+#+begin_src coq
+Lemma new_keys_empty : keys new = [].
+Proof.
+  remember (keys new) as k.
+  destruct k.
+  - reflexivity.
+  - exfalso.
+    assert (Hk : In k (keys new)).
+    { rewrite <-Heqk. apply in_eq. }
+    apply keys_some in Hk.
+    destruct Hk as [v nonsense].
+    specialize (new_empty k) as empty.
+    rewrite nonsense in empty.
+    discriminate.
+Qed.
+#+end_src
+
+This may look busy, but essentially it's a proof by contradiction.
+We start by case analysis of the return value of =keys new=.
+In the first case (empty list) we immediately obtain the goal.
+In the second case (the list starts from =k=) we apply =keys_some= and =new_empty= axioms to the key =k=.
+From =keys_some= axiom follows that =get k new = Some v=.
+From =new_empty= axiom follows that =get k new = None=.
+This is a contradiction. Qed.
+
+* Wait, what?
+
+/Warning: if you are familiar with coq, you are advised to skip this section, because my layman explanation may be offensively naïve./
+/Proceed reading at your own risk, and feel free to submit your complaints as PRs to https://github.com/k32/k32/
+
+If you are not familiar with Coq, the code from the previous section may look rather bizarre.
+However, I would argue that with a little practice, it can understood by anyone with a sufficient background in functional programming.
+
+In this section I will try to give a very high-level explanation of the mechanized theorem proving from the programmer's perspective, and shed some light on the meaning of =Lemma= and =Proof= keywords.
+I won't pretend that this will be a great explanation, so I immediately refer to an excellent free book: https://softwarefoundations.cis.upenn.edu
+
+** Curry-Howard correspondence
+
+One of the core ideas of using computers to verify mathematical[fn:constr] proofs is based on the bright idea called "the Curry-Howard correspondence".
+It's often summarized in a quote:
+
+#+begin_quote
+A proof is a program; the formula it proves is a type for the program
+#+end_quote
+
+As it turns out, all the laws of the mathematical logic[fn:constr], such as negation, implication, conjunction and disjunction can be expressed as [[*Appendix: logical statements as functional programs][small programs]].
+In other words, writing a program in a pure functional language is fundamentally the same process as creating a proof of a theorem.
+Following from that, typechecking is fundamentally the same process as verifying the proof.
+
+However, there is some fine print to this statement.
+Most mainstream functional languages are not really suitable for theorem proving, as they don't enforce totality of the functions.
+Coq is special in this regard, because it does that.
+
+** The true nature of Coq
+
+** Interactive proving
+
+Pair programming analogy
+
+* Transaction log replay
+
+Let's prove that applying the same =put= operation to
+
+* Appendix: logical statements as functional programs
+
+** Implication
+
+** Conjunction
+
+** Disjunction
+
+** Negation
+
+[fn:constr] In constuctivist logic
+
+
+#+DATE: 2021-04-27
