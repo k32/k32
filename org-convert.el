@@ -47,14 +47,14 @@
       org-export-with-toc nil
       org-export-with-author nil
       org-export-with-creator nil
-      org-export-with-email nil
-      org-export-with-section-numbers nil)
+      org-export-with-email nil)
 
 ;; Export options:
 (setq org-html-link-home "index.html")
 (setq org-html-head "<link rel=\"stylesheet\" type=\"text/css\" href=\"default.css\"/>
 <link href=\"atom.xml\" type=\"application/atom+xml\" rel=\"alternate\" title=\"k32's notebook\"/>
 <meta http-equiv=\"Permissions-Policy\" content=\"interest-cohort=()\"/>")
+(setq org-export-with-section-numbers t)
 ;(setq org-html-htmlize-output-type 'css)
 
 ;; Important settings for getting dates in the Atom feed right:

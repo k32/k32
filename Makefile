@@ -1,6 +1,6 @@
-POSTS=$(patsubst posts/%.org,out/%.html,$(wildcard posts/*.org))
-OUTDIR=out
-TMPDIR=tmp
+POSTS = $(patsubst posts/%.org,out/%.html,$(wildcard posts/*.org))
+OUTDIR := out
+TMPDIR := tmp
 
 .PHONY: all
 all: $(OUTDIR) $(POSTS) $(OUTDIR)/atom.xml static
@@ -20,11 +20,11 @@ PNGS ?= $(patsubst posts/%, $(OUTDIR)/%, $(wildcard $(TMPDIR)/*.png))
 $(OUTDIR)/%.png: $(TMPDIR)/%.png | $(POSTS)
 	convert -strip $< $@
 
-SVGS ?= $(patsubst posts/%,out/%,$(wildcard $(TMPDIR)/*.svg))
+SVGS ?= $(patsubst $(TMPDIR)/%, $(OUTDIR)/%, $(wildcard $(TMPDIR)/*.svg))
 $(OUTDIR)/%.svg: $(TMPDIR)/%.svg cleanup-svg.xsl | $(POSTS)
 	xsltproc cleanup-svg.xsl $< > $@
 
-STATIC = $(patsubst static/%, $(OUTDIR)/%, $(wildcard static/*))
+STATIC ?= $(patsubst static/%, $(OUTDIR)/%, $(wildcard static/*))
 $(OUTDIR)/%: static/% | $(OUTDIR)
 	cp $< $@
 

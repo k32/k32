@@ -7,6 +7,8 @@ I will keep updating this post with more details.
 Disclaimer: I am not an OTP dev, and not a mnesia dev.
 Anything that will be posted here will be derived from reading the code.
 
+Pictures contain clickable links.
+
 * Transaction
 
 Transaction fun runs in the same process that calls =mnesia:transaction= function.
@@ -52,6 +54,7 @@ return "{atomic, Ret}"
 #+RESULTS:
 [[file:mnesia_trans.svg]]
 
+** Data structures
 *** What's inside mnesia_activity_state?
 
 =mnesia_activity_state= is a process dictionary variable in the transaction process.
@@ -85,7 +88,26 @@ mnesia:transaction(fun() -> mnesia:write({bar, 1, 2}), mnesia:write({foo, 3, 3})
  {nodes, 'bar@me-emq'}]
 #+end_src
 
-* TODO Commit process in detail
+** TODO Transactional reads and writes
+
+#+BEGIN_SRC plantuml :file mnesia_simplified.svg
+box "node a"
+  participant tx
+  participant mnesia_locker as a
+end box
+box "node b"
+  participant mnesia_locker as b
+end box
+
+== mnesia:write(K) ==
+
+tx -> a : get write lock(K)
+tx -> b : get write lock(K)
+tx <- b : ok
+tx <- a : ok
+#+END_SRC
+
+** Commit process in detail
 
 Commit procedure also mostly happens in the caller process.
 This process acts as the coordinator.
@@ -144,8 +166,10 @@ tx -> tx ++ : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesi
       note over tx: Mnesia logs #commit record\nfor the local node.\nSee "Arrange" chapter below
       tx -> tx : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_log.erl#L227 mnesia_log:log]](#commit{})
 
-        note over tm_a : Only logs when tm_a is\n a disk node
-        tm_a -> tm_a : mnesia_log:log(Commit)
+        alt tm_a is a disk node
+          tm_a -> tm_a : mnesia_log:log(Commit)
+        end
+
         tm_a -> tm_a : mnesia_recover:note_decision(Tid, committed)
 
 == Post-commit actions ==
@@ -180,7 +204,7 @@ end
 #+RESULTS:
 [[file:mnesia_subscr.svg]]
 
-** Arrange
+*** Arrange
 
 Arrange function is pretty convoluted.
 Thankfully, it only uses the local data from the transaction store and the schema.
@@ -216,7 +240,7 @@ mnesia:transaction(fun() -> mnesia:write({foo, 1, 2}), mnesia:write({foo, 3, 3})
 The first element is the number of write/delete ops in the transaction.
 This number is used to determine whether the transaction is r/o or r/w.
 
-** What is stored in the mnesia_tm's state?
+*** What is stored in the mnesia_tm's state?
 
 #+begin_src erlang
 mnesia:transaction(fun() -> mnesia:write({foo, 1, 2}), mnesia:write({foo, 3, 3}) end).
@@ -246,7 +270,7 @@ mnesia:transaction(fun() -> mnesia:write({foo, 1, 2}), mnesia:write({foo, 3, 3})
   }
 #+end_src
 
-** What's stored in the mnesia log?
+*** What's stored in the mnesia log?
 
 The contents of the =#commit{}= record for the current node are written to the mnesia log:
 
@@ -254,39 +278,115 @@ The contents of the =#commit{}= record for the current node are written to the m
 mnesia:transaction(fun() -> mnesia:write({foo, 1, 2}), mnesia:write({foo, 3, 3}) end).
 ....
 
-#commit{node = 'bar@localhost,decision = presume_commit,
+#commit{node = 'bar@localhost',
+        decision = presume_commit,
         ram_copies = [{{foo,1},{foo,1,2},write},
                       {{foo,3},{foo,3,3},write}],
-        disc_copies = [],disc_only_copies = [],ext = [],
-        schema_ops = []}
+        disc_copies = [],
+        disc_only_copies = [],
+        ext = [],
+        schema_ops = []
+       }
 #+end_src
 
 Note that the commit is only logged on the node that initiated the transaction and the participant /disk/ nodes.
-
-* TODO Transactional reads and writes
-
-#+BEGIN_SRC plantuml :file mnesia_simplified.svg
-box "node a"
-  participant tx
-  participant mnesia_locker as a
-end box
-box "node b"
-  participant mnesia_locker as b
-end box
-
-== mnesia:write(K) ==
-
-tx -> a : get write lock(K)
-tx -> b : get write lock(K)
-tx <- b : ok
-tx <- a : ok
-#+END_SRC
 
 * TODO Locker
 
 * TODO Schema
 
 * TODO Transaction aborts and restarts
+* TODO Dirty writes
+
+#+begin_src plantuml :file mnesia_dirty_write.svg
+box "Original node" #White
+  participant tx as tx
+end box
+
+box "Participant A" #LightBlue
+  participant mnesia_tm as tm_a
+end box
+
+tx -> tx++ : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia.erl#L1790 mnesia:do_dirty_write/3]]
+  tx -> tx : mnesia_lib:validate_record
+
+  tx -> tx ++ : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L1064 mnesia_tm:dirty/2]]
+    note over tx : Send commit records to the other involved nodes,\n\
+but do only wait for one node to complete.\n\
+Preferrably, the local node if possible.
+
+    tx -> tx : mnesia_tm:prepare_items
+
+    loop for each #commit record in #prep.records
+      alt #commit.node == node()
+        tx -> tx : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L1777 mnesia_tm:do_dirty]]
+      else
+        note over tx : Can be async_dirty too\nIn this case there's no reply
+        tx -\ tm_a ++ : {self(), {sync_dirty, Tid, Head, Tab}}
+      end
+    end
+
+        tm_a -> tm_a : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L221 doit_loop]]
+        alt table is blocked
+          note over tm_a : Add record to the dirty queue\nDo not respond yet.
+        else
+          tm_a -> tm_a : Res = mnesia_tm:do_dirty
+          tm_a -\ tx -- : {dirty_res, Res}
+        end
+
+    note over tx : Wait for the first node's reply:
+    tx -> tx : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L2026 mnesia_tm:rec_dirty/2]]
+ return ok
+return ok
+#+end_src
+
+#+RESULTS:
+[[file:mnesia_dirty_write.svg]]
+
+** Data structures
+*** What's inside #prep record?
+
+#+begin_src erlang
+mnesia:dirty_write({foo, 1, 1}).
+....
+
+#prep{protocol = async_dirty,
+      records = [#commit{node = 'bar@localhost',
+                         decision = presume_commit,
+                         ram_copies = [{{foo,1},{foo,1,1},write}],
+                         disc_copies = [],disc_only_copies = [],ext = [],
+                         schema_ops = []},
+                 #commit{node = 'foo@localhost',decision = presume_commit,
+                         ram_copies = [{{foo,1},{foo,1,1},write}],
+                         disc_copies = [],disc_only_copies = [],ext = [],
+                         schema_ops = []}],
+      prev_tab = foo,
+      prev_types = [{'bar@localhost',ram_copies},
+                    {'foo@localhost',ram_copies}],
+      prev_snmp = [],
+      types = [{'bar@localhost',ram_copies},
+               {'foo@localhost',ram_copies}],
+      majority = [],sync = false}
+
+#+end_src
+
+*** What is sent to the remote node?
+
+#+begin_src erlang
+mnesia:dirty_write({foo, 1, 1}).
+....
+
+{<11304.91.0>,
+ {async_dirty,{dirty,<11304.91.0>},
+              #commit{node = 'foo@me-emq',
+                      decision = presume_commit,
+                      ram_copies = [{{foo,1},{foo,1,1},write}],
+                      disc_copies = [],
+                      disc_only_copies = [],
+                      ext = [],
+                      schema_ops = []},
+              foo}}
+#+end_src
 
 * TODO Scalability
 
