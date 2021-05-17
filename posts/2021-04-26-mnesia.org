@@ -144,6 +144,7 @@ tx -> tx ++ : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesi
       note over tx: Mnesia logs #commit record\nfor the local node.\nSee "Arrange" chapter below
       tx -> tx : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_log.erl#L227 mnesia_log:log]](#commit{})
 
+        note over tm_a : Only logs when tm_a is\n a disk node
         tm_a -> tm_a : mnesia_log:log(Commit)
         tm_a -> tm_a : mnesia_recover:note_decision(Tid, committed)
 
@@ -245,6 +246,22 @@ mnesia:transaction(fun() -> mnesia:write({foo, 1, 2}), mnesia:write({foo, 3, 3})
   }
 #+end_src
 
+** What's stored in the mnesia log?
+
+The contents of the =#commit{}= record for the current node are written to the mnesia log:
+
+#+begin_src erlang
+mnesia:transaction(fun() -> mnesia:write({foo, 1, 2}), mnesia:write({foo, 3, 3}) end).
+....
+
+#commit{node = 'bar@localhost,decision = presume_commit,
+        ram_copies = [{{foo,1},{foo,1,2},write},
+                      {{foo,3},{foo,3,3},write}],
+        disc_copies = [],disc_only_copies = [],ext = [],
+        schema_ops = []}
+#+end_src
+
+Note that the commit is only logged on the node that initiated the transaction and the participant /disk/ nodes.
 
 * TODO Transactional reads and writes
 
