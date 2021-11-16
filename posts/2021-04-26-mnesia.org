@@ -170,15 +170,15 @@ tx -> tx ++ : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesi
           tm_a -> tm_a : mnesia_log:log(Commit)
         end
 
-        tm_a -> tm_a : mnesia_recover:note_decision(Tid, committed)
+        tm_a -> tm_a : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_recover.erl#L218 mnesia_recover:note_decision]](Tid, committed)
 
 == Post-commit actions ==
-      tx -> tx ++ : mnesia_tm:do_commit
+      tx -> tx ++ : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L1789 mnesia_tm:do_commit]]
         note over tx: Dump the ops to the DB,\n notify subscribers,\n etc.
-        tx -> tx : mnesia_tm:do_snmp
+        tx -> tx : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L1930 mnesia_tm:do_snmp]]
         tx -> tx : update_ram_copies
         tx -> tx : update_disc_copies
-        tx -> tx : mnesia_tm:do_update_ext
+        tx -> tx : [[https://github.com/erlang/otp/blob/OTP-24.0/lib/mnesia/src/mnesia_tm.erl#L1801 mnesia_tm:do_update_ext]]
         tx -> tx : mnesia_subscr:report_activity
       return ?
     return ?
@@ -296,7 +296,7 @@ Note that the commit is only logged on the node that initiated the transaction a
 * TODO Schema
 
 * TODO Transaction aborts and restarts
-* TODO Dirty writes
+* Dirty writes
 
 #+begin_src plantuml :file mnesia_dirty_write.svg
 box "Original node" #White
@@ -387,6 +387,61 @@ mnesia:dirty_write({foo, 1, 1}).
                       schema_ops = []},
               foo}}
 #+end_src
+
+* Ext copies
+There is an undocumented feature that allows to implement a custom mnesia backends.
+It's called =ext_copies= (I guess).
+Let's look at how it can be used.
+
+From =mnesia_tm=:
+
+#+begin_src erlang
+do_commit(Tid, Bin, DumperMode) when is_binary(Bin) ->
+    do_commit(Tid, binary_to_term(Bin), DumperMode);
+do_commit(Tid, C, DumperMode) ->
+    ...
+    R2 = do_update(Tid, ram_copies, C#commit.ram_copies, R),
+    R3 = do_update(Tid, disc_copies, C#commit.disc_copies, R2),
+    R4 = do_update(Tid, disc_only_copies, C#commit.disc_only_copies, R3),
+    R5 = do_update_ext(Tid, C#commit.ext, R4),
+    ...
+    .
+
+...
+
+do_update_ext(_Tid, [], OldRes) -> OldRes;
+do_update_ext(Tid, Ext, OldRes) ->
+    case lists:keyfind(ext_copies, 1, Ext) of
+      false -> OldRes;
+      {_, Ops} ->
+        Do = fun({{ext, _, _} = Storage, Op}, R) ->
+                 do_update(Tid, Storage, [Op], R)
+             end,
+        lists:foldl(Do, OldRes, Ops)
+    end.
+#+end_src
+
+And =mnesia_lib.erl= has the following functions inside:
+#+begin_src erlang
+db_put(ram_copies, Tab, Val) -> ?ets_insert(Tab, Val), ok;
+db_put(disc_copies, Tab, Val) -> ?ets_insert(Tab, Val), ok;
+db_put(disc_only_copies, Tab, Val) -> dets:insert(Tab, Val);
+db_put({ext, Alias, Mod}, Tab, Val) ->
+    Mod:insert(Alias, Tab, Val).
+
+
+db_erase(Tab, Key) ->
+    db_erase(val({Tab, storage_type}), Tab, Key).
+db_erase(ram_copies, Tab, Key) -> ?ets_delete(Tab, Key), ok;
+db_erase(disc_copies, Tab, Key) -> ?ets_delete(Tab, Key), ok;
+db_erase(disc_only_copies, Tab, Key) -> dets:delete(Tab, Key);
+db_erase({ext, Alias, Mod}, Tab, Key) ->
+    Mod:delete(Alias, Tab, Key),
+    ok.
+#+end_src
+
+So mnesia expects a list of ={{ext, Alias, Module}, Op}= tuples in the commit record.
+
 
 * TODO Scalability
 
